@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>中美行业龙头对比看板</title>
+<style>
+:root {
+  --bg-primary: #0f1117;
+  --bg-secondary: #1a1d27;
+  --bg-card: #1e2130;
+  --bg-hover: #262a38;
+  --border-color: #2a2d3a;
+  --text-primary: #e8eaed;
+  --text-secondary: #9aa0b0;
+  --text-muted: #5f6577;
+  --accent-blue: #4f8cff;
+  --accent-green: #00b578;
+  --accent-red: #ff4d5a;
+  --accent-orange: #ff9f43;
+  --accent-purple: #a55eea;
+  --gradient-header: linear-gradient(135deg, #1a1d27 0%, #252840 100%);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.5);
+  --radius-sm: 6px; --radius-md: 10px; --radius-lg: 16px;
+  --transition: 0.2s ease;
+  --sidebar-w: 220px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg-primary); color: var(--text-primary); line-height: 1.5; overflow-x: hidden;
+}
+/* ===== Header ===== */
+.header {
+  background: var(--gradient-header); border-bottom: 1px solid var(--border-color);
+  padding: 12px 20px; display: flex; align-items: center; justify-content: space-between;
+  position: sticky; top: 0; z-index: 100; backdrop-filter: blur(10px); gap: 10px;
+}
+.header-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.logo-icon {
+  width: 36px; height: 36px; background: linear-gradient(135deg, var(--accent-blue), #2ed8a3);
+  border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 700; color: white; flex-shrink: 0;
+}
+.header-title { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; white-space: nowrap; }
+.header-subtitle { font-size: 10px; color: var(--text-secondary); margin-top: 1px; display: none; }
+.header-right { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+.header-stat { text-align: right; }
+.header-stat-value { font-size: 16px; font-weight: 700; }
+.header-stat-label { font-size: 9px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
+.update-time { font-size: 10px; color: var(--text-muted); display: flex; align-items: center; gap: 5px; }
+.update-dot { width: 6px; height: 6px; background: var(--accent-green); border-radius: 50%; animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+/* ===== Mobile Menu Button ===== */
+.menu-btn {
+  display: none; width: 36px; height: 36px; border: 1px solid var(--border-color);
+  background: var(--bg-card); border-radius: var(--radius-sm); cursor: pointer;
+  align-items: center; justify-content: center; flex-shrink: 0; color: var(--text-secondary); font-size: 18px;
+}
+.menu-btn:active { background: var(--bg-hover); }
+
+/* ===== Sidebar ===== */
+.sidebar-overlay {
+  display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.5); z-index: 150;
+}
+.sidebar-overlay.active { display: block; }
+.main-container { display: flex; height: calc(100vh - 60px); }
+.sidebar {
+  width: var(--sidebar-w); background: var(--bg-secondary); border-right: 1px solid var(--border-color);
+  overflow-y: auto; flex-shrink: 0; transition: transform 0.3s ease;
+}
+.sidebar-header {
+  padding: 12px 16px 6px; font-size: 10px; text-transform: uppercase;
+  letter-spacing: 1px; color: var(--text-muted); font-weight: 600;
+}
+.concept-divider {
+  padding: 8px 16px 4px; font-size: 10px; text-transform: uppercase;
+  letter-spacing: 1px; color: var(--accent-purple); font-weight: 600;
+  border-top: 1px solid var(--border-color); margin-top: 4px;
+}
+.sector-nav-item {
+  padding: 9px 14px; cursor: pointer; display: flex; align-items: center; gap: 8px;
+  font-size: 12.5px; color: var(--text-secondary); transition: all var(--transition);
+  border-left: 3px solid transparent;
+}
+.sector-nav-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+.sector-nav-item.active {
+  background: rgba(79,140,255,0.08); color: var(--accent-blue); border-left-color: var(--accent-blue); font-weight: 600;
+}
+.sector-nav-item.concept.active {
+  background: rgba(165,94,234,0.08); color: var(--accent-purple); border-left-color: var(--accent-purple);
+}
+.sector-icon { width: 26px; height: 26px; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; }
+.sector-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sector-count { font-size: 10px; color: var(--text-muted); background: var(--bg-card); padding: 1px 7px; border-radius: 10px; flex-shrink: 0; }
+.sector-nav-item.active .sector-count { background: rgba(79,140,255,0.15); color: var(--accent-blue); }
+.sector-nav-item.concept.active .sector-count { background: rgba(165,94,234,0.15); color: var(--accent-purple); }
+
+/* ===== Content ===== */
+.content { flex: 1; overflow-y: auto; padding: 18px 24px; min-width: 0; }
+.summary-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
+.summary-card {
+  background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md);
+  padding: 12px 14px; display: flex; align-items: center; gap: 10px;
+}
+.summary-icon { width: 36px; height: 36px; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+.summary-info h3 { font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 2px; font-weight: 500; }
+.summary-info .value { font-size: 18px; font-weight: 700; }
+
+/* ===== Sector Panel ===== */
+.sector-content { display: none; }
+.sector-content.active { display: block; animation: fadeIn .3s ease; }
+@keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+.sector-title-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 6px; }
+.sector-title { font-size: 18px; font-weight: 700; }
+.sector-title .concept-tag {
+  font-size: 10px; background: rgba(165,94,234,0.15); color: var(--accent-purple);
+  padding: 2px 8px; border-radius: 10px; margin-left: 8px; font-weight: 600;
+}
+.comparison-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+/* ===== Market Panel ===== */
+.market-panel { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); overflow: hidden; }
+.panel-header {
+  padding: 10px 16px; border-bottom: 1px solid var(--border-color);
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;
+}
+.panel-title { font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 5px; }
+.panel-flag { font-size: 18px; }
+.panel-stats { font-size: 10px; color: var(--text-secondary); white-space: nowrap; }
+.panel-stats .up { color: var(--accent-red); }
+.panel-stats .down { color: var(--accent-green); }
+
+/* ===== Table ===== */
+.stock-table-wrap { overflow-x: auto; max-height: 60vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.stock-table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 480px; }
+.stock-table thead { position: sticky; top: 0; z-index: 1; }
+.stock-table th {
+  text-align: left; padding: 8px 12px; font-size: 10px; font-weight: 600; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: .5px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color); white-space: nowrap;
+}
+.stock-table td { padding: 7px 12px; border-bottom: 1px solid rgba(42,45,58,0.4); white-space: nowrap; }
+.stock-table tbody tr { transition: background var(--transition); }
+.stock-table tbody tr:hover { background: var(--bg-hover); }
+.rank-cell { width: 28px; text-align: center; font-weight: 700; font-size: 11px; color: var(--text-muted); }
+.rank-1 { color: #ffc107 !important; } .rank-2 { color: #b0bec5 !important; } .rank-3 { color: #ff8a65 !important; }
+.stock-name { font-weight: 600; color: var(--text-primary); }
+.stock-code { font-size: 10px; color: var(--text-muted); margin-left: 3px; }
+.price-cell { font-weight: 600; font-variant-numeric: tabular-nums; }
+.change-cell { font-weight: 600; }
+.market-cap-cell { color: var(--text-secondary); }
+.up { color: var(--accent-red); } .down { color: var(--accent-green); }
+.empty-state { padding: 40px 20px; text-align: center; color: var(--text-muted); }
+.empty-state-icon { font-size: 36px; margin-bottom: 8px; opacity: .5; }
+
+/* ===== Loading ===== */
+#loadingOverlay {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md);
+  padding: 18px 24px; display: flex; align-items: center; gap: 10px; z-index: 200; box-shadow: var(--shadow-lg);
+}
+.spinner { width: 18px; height: 18px; border: 2px solid var(--border-color); border-top-color: var(--accent-blue); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to{transform:rotate(360deg)} }
+
+/* ===== Scrollbar ===== */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ===== Desktop (>=1200px) ===== */
+@media (min-width:1200px) {
+  .header-subtitle { display: block; }
+  .content { padding: 20px 28px; }
+  .stock-table { font-size: 12.5px; }
+  .stock-table th { padding: 9px 14px; }
+  .stock-table td { padding: 8px 14px; }
+}
+
+/* ===== Tablet (<1200px) ===== */
+@media (max-width:1199px) {
+  .comparison-grid { grid-template-columns: 1fr; }
+  .summary-bar { grid-template-columns: repeat(2,1fr); }
+}
+
+/* ===== Mobile (<768px) ===== */
+@media (max-width:767px) {
+  .menu-btn { display: flex; }
+  .sidebar {
+    position: fixed; top: 0; left: 0; height: 100%; z-index: 200;
+    transform: translateX(-100%); box-shadow: var(--shadow-lg);
+  }
+  .sidebar.open { transform: translateX(0); }
+  .main-container { height: calc(100vh - 56px); }
+  .header { padding: 10px 14px; }
+  .header-title { font-size: 15px; }
+  .header-subtitle { display: none; }
+  .header-right { gap: 10px; }
+  .header-stat-value { font-size: 14px; }
+  .header-stat-label { font-size: 8px; }
+  .update-time { font-size: 9px; }
+  .content { padding: 12px 14px; }
+  .summary-bar { grid-template-columns: repeat(2,1fr); gap: 8px; }
+  .summary-card { padding: 10px 12px; }
+  .summary-icon { width: 32px; height: 32px; font-size: 14px; }
+  .summary-info .value { font-size: 15px; }
+  .sector-title { font-size: 16px; }
+  .comparison-grid { gap: 12px; }
+  .stock-table { font-size: 11px; min-width: 440px; }
+  .stock-table th { padding: 7px 10px; font-size: 9px; }
+  .stock-table td { padding: 6px 10px; }
+  .panel-header { padding: 8px 12px; }
+  .panel-title { font-size: 12px; }
+  .panel-flag { font-size: 16px; }
+}
+
+/* ===== Small mobile (<480px) ===== */
+@media (max-width:479px) {
+  .summary-bar { grid-template-columns: 1fr 1fr; gap: 6px; }
+  .summary-card { padding: 8px 10px; gap: 8px; }
+  .summary-info .value { font-size: 14px; }
+  .summary-info h3 { font-size: 8px; }
+  .sector-nav-item { padding: 8px 12px; font-size: 12px; }
+  .sector-icon { width: 22px; height: 22px; font-size: 11px; }
+}
+
+/* Safe area for notched phones */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .header { padding-top: max(12px, env(safe-area-inset-top)); }
+  .sidebar { padding-top: env(safe-area-inset-top); }
+}
+</style>
+</head>
+<body>
+<header class="header">
+  <button class="menu-btn" id="menuBtn" onclick="toggleSidebar()">☰</button>
+  <div class="header-left">
+    <div class="logo-icon">VS</div>
+    <div><div class="header-title">中美行业龙头对比看板</div><div class="header-subtitle">US vs China Sector Leaders</div></div>
+  </div>
+  <div class="header-right">
+    <div class="header-stat"><div class="header-stat-value" id="totalStocks">-</div><div class="header-stat-label">股票总数</div></div>
+    <div class="header-stat"><div class="header-stat-value" id="totalSectors">-</div><div class="header-stat-label">板块</div></div>
+    <div class="update-time"><div class="update-dot"></div><span id="updateTime">加载中...</span></div>
+  </div>
+</header>
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+<div class="main-container">
+  <nav class="sidebar" id="sidebar"></nav>
+  <main class="content" id="mainContent">
+    <div class="summary-bar" id="summaryBar"></div>
+    <div id="sectorPanels"></div>
+  </main>
+</div>
+<div id="loadingOverlay"><div class="spinner"></div><span>数据加载中...</span></div>
+
+<script src="data.js"></script>
+<script>
+/* ===== 配置 ===== */
+const ICONS={
+  "软件":"💻","半导体产品":"🔲","半导体设备":"⚙️","电脑硬件":"🖥️",
+  "综合性银行":"🏦","综合零售":"🛒","制药":"💊","石油天然气":"🛢️",
+  "航天航空国防":"✈️","生物科技":"🧬","投资银行":"📈","通信设备":"📡",
+  "电力":"⚡","电气设备":"🔌","黄金":"🥇","大卖场超市":"🏪",
+  "食品饮料":"🍔","汽车":"🚗","工业机械":"🏭",
+  // 概念板块
+  "AI硬件":"🤖","AI软件":"🧠","医药概念":"🏥","电气概念":"🔋"
+};
+const SECT_FULL={
+  "软件":"软件（系统软件，应用软件）","半导体产品":"半导体产品","半导体设备":"半导体设备",
+  "电脑硬件":"电脑硬件、存储设备及电脑周边","综合性银行":"综合性银行",
+  "综合零售":"综合零售（互联网平台，电子商务）","制药":"制药",
+  "石油天然气":"综合性石油与天然气企业","航天航空国防":"航天航空与国防",
+  "生物科技":"生物科技","投资银行":"投资银行与经纪业务（券商，信托等）",
+  "通信设备":"通信设备","电力":"电力","电气设备":"电气部件与设备",
+  "黄金":"黄金","大卖场超市":"大卖场与超市","食品饮料":"食品饮料",
+  "汽车":"汽车","工业机械":"工业机械",
+  // 概念板块
+  "AI硬件":"AI硬件产品及制造","AI软件":"AI软件应用及IT服务",
+  "医药概念":"医药（中美可比）","电气概念":"电气设备（中美可比）"
+};
+// 概念板块列表
+const CONCEPT_KEYS=["AI硬件","AI软件","医药概念","电气概念"];
+// 行业板块列表（来自ICONS中不在CONCEPT_KEYS中的）
+const INDUSTRY_KEYS=Object.keys(ICONS).filter(k=>!CONCEPT_KEYS.includes(k));
+
+let data={},cur=null;
+
+/* ===== 工具函数 ===== */
+function fmtMC(v){
+  if(!v||v===0) return '-';
+  if(v>=1e12) return (v/1e12).toFixed(2)+' 万亿';
+  if(v>=1e8) return (v/1e8).toFixed(2)+' 亿';
+  return (v/1e4).toFixed(2)+' 万';
+}
+function chgCls(v){ if(v>0) return 'up'; if(v<0) return 'down'; return ''; }
+function chgSign(v){ if(v>0) return '+'+v.toFixed(2)+'%'; if(v<0) return v.toFixed(2)+'%'; return '0.00%'; }
+function isConcept(k){ return CONCEPT_KEYS.includes(k); }
+
+/* ===== 股票行渲染 ===== */
+function stockRow(s,i){
+  return `<tr>
+    <td class="rank-cell ${i<3?'rank-'+(i+1):''}">${i+1}</td>
+    <td><span class="stock-name">${s.name||'-'}</span><span class="stock-code">${s.code||''}</span></td>
+    <td class="price-cell">${s.price?s.price.toFixed(2):'-'}</td>
+    <td class="change-cell ${chgCls(s.change_pct)}">${chgSign(s.change_pct||0)}</td>
+    <td class="market-cap-cell">${fmtMC(s.market_cap)}</td>
+    <td class="market-cap-cell">${s.pe&&s.pe>0?s.pe.toFixed(1):'-'}</td>
+  </tr>`;
+}
+
+/* ===== 面板构建 ===== */
+function buildPanel(key){
+  const d=data[key];
+  if(!d) return '';
+  const cn=d.a_share||{stocks:[],count:0};
+  const us=d.us||{stocks:[],count:0};
+  const cnUp=cn.stocks.filter(s=>s.change_pct>0).length;
+  const cnDown=cn.stocks.filter(s=>s.change_pct<0).length;
+  const usUp=us.stocks.filter(s=>s.change_pct>0).length;
+  const usDown=us.stocks.filter(s=>s.change_pct<0).length;
+  const isConc=isConcept(key);
+  const title=SECT_FULL[key]||key;
+
+  const cnRows=cn.stocks.length?cn.stocks.map((s,i)=>stockRow(s,i)).join(''):
+    `<tr><td colspan="6"><div class="empty-state"><div class="empty-state-icon">📊</div>暂无数据</div></td></tr>`;
+  const usRows=us.stocks.length?us.stocks.map((s,i)=>stockRow(s,i)).join(''):
+    `<tr><td colspan="6"><div class="empty-state"><div class="empty-state-icon">📊</div>暂无数据</div></td></tr>`;
+
+  return `<div class="sector-content" data-sector="${key}">
+    <div class="sector-title-bar">
+      <span class="sector-title">${title}${isConc?'<span class="concept-tag">概念板块</span>':''}</span>
+    </div>
+    <div class="comparison-grid">
+      <div class="market-panel">
+        <div class="panel-header">
+          <span class="panel-title"><span class="panel-flag">🇨🇳</span>A股 · ${title}</span>
+          <span class="panel-stats">共 ${cn.count} 只 | <span class="up">涨 ${cnUp}</span> <span class="down">跌 ${cnDown}</span></span>
+        </div>
+        <div class="stock-table-wrap">
+          <table class="stock-table">
+            <thead><tr><th>#</th><th>股票</th><th>股价</th><th>涨跌</th><th>市值</th><th>PE</th></tr></thead>
+            <tbody>${cnRows}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="market-panel">
+        <div class="panel-header">
+          <span class="panel-title"><span class="panel-flag">🇺🇸</span>美股 · ${title}</span>
+          <span class="panel-stats">共 ${us.count} 只 | <span class="up">涨 ${usUp}</span> <span class="down">跌 ${usDown}</span></span>
+        </div>
+        <div class="stock-table-wrap">
+          <table class="stock-table">
+            <thead><tr><th>#</th><th>股票</th><th>股价</th><th>涨跌</th><th>市值</th><th>PE</th></tr></thead>
+            <tbody>${usRows}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ===== 切换板块 ===== */
+function switchSector(key){
+  document.querySelectorAll('.sector-nav-item').forEach(el=>el.classList.remove('active'));
+  document.querySelectorAll('.sector-content').forEach(el=>el.classList.remove('active'));
+  const nav=document.querySelector(`.sector-nav-item[data-sector="${key}"]`);
+  const panel=document.querySelector(`.sector-content[data-sector="${key}"]`);
+  if(nav) nav.classList.add('active');
+  if(panel) panel.classList.add('active');
+  cur=key;
+  updateSummary(key);
+  // 手机端切换后自动收起侧栏
+  if(window.innerWidth<768) closeSidebar();
+}
+
+function updateSummary(key){
+  const d=data[key];
+  if(!d) return;
+  const cn=d.a_share||{stocks:[]};
+  const us=d.us||{stocks:[]};
+  const cnMC=cn.stocks.reduce((s,x)=>s+(x.market_cap||0),0);
+  const usMC=us.stocks.reduce((s,x)=>s+(x.market_cap||0),0);
+  document.getElementById('summaryMC_CN').textContent=fmtMC(cnMC);
+  document.getElementById('summaryMC_US').textContent=fmtMC(usMC);
+  document.getElementById('summaryCnt_CN').textContent=cn.stocks.length+' 只';
+  document.getElementById('summaryCnt_US').textContent=us.stocks.length+' 只';
+}
+
+/* ===== 初始化看板 ===== */
+function initDash(){
+  const sidebar=document.getElementById('sidebar');
+  const panels=document.getElementById('sectorPanels');
+  const sBar=document.getElementById('summaryBar');
+  const allKeys=[...INDUSTRY_KEYS,...CONCEPT_KEYS];
+
+  // Summary Bar
+  sBar.innerHTML=`
+    <div class="summary-card"><div class="summary-icon" style="background:rgba(79,140,255,.15)">🇨🇳</div><div class="summary-info"><h3>A股总市值</h3><div class="value" id="summaryMC_CN">-</div></div></div>
+    <div class="summary-card"><div class="summary-icon" style="background:rgba(255,77,90,.15)">🇺🇸</div><div class="summary-info"><h3>美股总市值</h3><div class="value" id="summaryMC_US">-</div></div></div>
+    <div class="summary-card"><div class="summary-icon" style="background:rgba(165,94,234,.15)">📋</div><div class="summary-info"><h3>A股数量</h3><div class="value" id="summaryCnt_CN">-</div></div></div>
+    <div class="summary-card"><div class="summary-icon" style="background:rgba(46,216,163,.15)">🔝</div><div class="summary-info"><h3>美股数量</h3><div class="value" id="summaryCnt_US">-</div></div></div>`;
+
+  // Sidebar
+  let navHtml='<div class="sidebar-header">行业板块</div>';
+  let panelHtml='';
+  let firstKey=null;
+
+  allKeys.forEach((k,i)=>{
+    const d=data[k];
+    const isConc=isConcept(k);
+    // 行业→概念分界线
+    if(!isConc && firstKey===null) firstKey=k;
+    if(isConc && (i===0 || !isConcept(allKeys[i-1]))){
+      navHtml+='<div class="concept-divider">概念板块</div>';
+    }
+    const total=(d?(d.a_share?.count||0)+(d.us?.count||0):0);
+    navHtml+=`<div class="sector-nav-item${isConc?' concept':''}${i===0?' active':''}" data-sector="${k}" onclick="switchSector('${k}')">
+      <span class="sector-icon">${ICONS[k]||'📊'}</span><span class="sector-label">${k}</span><span class="sector-count">${total}</span></div>`;
+    panelHtml+=buildPanel(k);
+  });
+  sidebar.innerHTML=navHtml;
+  panels.innerHTML=panelHtml;
+
+  if(allKeys.length>0) switchSector(allKeys[0]);
+
+  // Header stats
+  let totalStocks=0, industryCnt=0, conceptCnt=0;
+  allKeys.forEach(k=>{ const d=data[k]; if(d) totalStocks+=(d.a_share?.count||0)+(d.us?.count||0); });
+  industryCnt=INDUSTRY_KEYS.length;
+  conceptCnt=CONCEPT_KEYS.length;
+  document.getElementById('totalStocks').textContent=totalStocks;
+  document.getElementById('totalSectors').textContent=industryCnt+conceptCnt;
+  document.getElementById('loadingOverlay').style.display='none';
+}
+
+/* ===== 侧栏控制（手机端） ===== */
+function toggleSidebar(){
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebarOverlay').classList.toggle('active');
+}
+function closeSidebar(){
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebarOverlay').classList.remove('active');
+}
+
+/* ===== 数据加载 ===== */
+async function loadData(){
+  if(typeof SECTOR_DATA !== 'undefined' && SECTOR_DATA && SECTOR_DATA.sectors){
+    data=SECTOR_DATA.sectors;
+    document.getElementById('updateTime').textContent='更新于 '+(SECTOR_DATA.generated_time||SECTOR_DATA.generated_at||'--').replace('T',' ').substring(0,16);
+    initDash();
+    return;
+  }
+  try{
+    const resp=await fetch('../data/sector_data.json');
+    if(!resp.ok) throw new Error('no data');
+    const j=await resp.json();
+    data=j.sectors||{};
+    document.getElementById('updateTime').textContent='更新于 '+(j.generated_time||'--').replace('T',' ').substring(0,16);
+    initDash();
+  }catch(e){
+    console.warn('Data file unavailable, loading demo data');
+    loadDemo();
+  }
+}
+
+function loadDemo(){
+  data=genDemo();
+  document.getElementById('updateTime').textContent='更新于 '+new Date().toLocaleTimeString('zh-CN')+' (演示)';
+  initDash();
+}
+
+function genDemo(){
+  const usBase=[["MSFT","Microsoft",420.5,1.25,3.12e12],["ORCL","Oracle",128.3,-0.45,3.5e11],["ADBE","Adobe",510.2,.8,2.3e11],["CRM","Salesforce",270.8,2.1,2.6e11],["NOW","ServiceNow",780.5,1.5,1.6e11],["INTU","Intuit",650,-.3,1.82e11],["SNPS","Synopsys",550.3,.9,8.5e10],["CDNS","Cadence",310.2,1.1,8.5e10],["WDAY","Workday",260,.5,6.9e10],["PLTR","Palantir",25.3,4.2,5.8e10],["TEAM","Atlassian",220,-1,5.7e10],["CRWD","CrowdStrike",370,1.8,9e10],["PANW","Palo Alto",350,.6,1.1e11],["DDOG","Datadog",125,2.3,4.2e10],["FTNT","Fortinet",68.5,-.5,5.3e10],["ZS","Zscaler",190,1.2,2.9e10],["NET","Cloudflare",85,3.5,2.9e10],["MDB","MongoDB",350,-1.5,2.6e10],["HUBS","HubSpot",620,.8,3.2e10],["DOCU","DocuSign",60,.4,1.2e10],["ZM","Zoom",68,-.8,2.1e10],["DT","Dynatrace",48,1.1,1.4e10],["OKTA","Okta",95,-.3,1.6e10],["TWLO","Twilio",62,2.1,1.1e10],["DBX","Dropbox",25,.2,8.5e9],["BOX","Box",28.5,.15,4.2e9],["BILL","BILL",55,1.8,5.8e9],["APP","AppLovin",85,3.2,3e10],["TTD","Trade Desk",90,-.5,4.5e10],["RBLX","Roblox",42,1.5,2.7e10]];
+  const cnBase=[["002230","科大讯飞",45.2,2.35,1.05e11],["300033","同花顺",128.5,-1.2,6.9e10],["600536","中国软件",38.6,1.8,3.3e10],["002410","广联达",22.8,.45,3.8e10],["300624","万兴科技",68.3,3.15,1.4e10],["688111","金山办公",280,1.5,1.29e11],["002368","太极股份",32.5,.8,1.9e10],["300454","深信服",75,-.6,3.1e10],["688561","奇安信",35,2.1,2.4e10],["300188","美亚柏科",18.5,-1.2,1.6e10],["300379","东方通",15.8,.9,7.3e9],["688023","安恒信息",120,-2.5,9.5e9],["002268","卫士通",45,1.3,3.8e10],["300369","绿盟科技",10.5,.4,8.4e9],["002439","启明星辰",25,-.8,2.3e10],["300352","北信源",6.8,1.5,9.9e9],["688568","中科星图",48,2,1.2e10],["002065","东华软件",8.5,.3,2.7e10],["600588","用友网络",18,-1.5,6.2e10],["300271","华宇软件",7.2,.6,5.9e9],["688095","福昕软件",85,3.5,7.8e9],["300603","立昂技术",9.8,1.2,4.5e9],["002405","四维图新",10.2,-.5,2.4e10],["300768","迪普科技",15.5,.8,1e10],["603039","泛微网络",55,1,1.4e10],["300166","东方国信",9.5,-1,1.1e10],["300682","朗新科技",20,2.8,2.2e10],["300996","普联软件",28,1.5,6e9],["301185","鸥玛软件",22,-.8,3.5e9],["002777","久远银海",18,1.2,7.3e9]];
+  function jitter(arr){ return arr.map(s=>[s[0],s[1],+(s[2]+(Math.random()-.5)*s[2]*.1).toFixed(2),+((s[3]||0)+(Math.random()-.5)*4).toFixed(2),s[4]*(1+(Math.random()-.5)*.1)]); }
+  const out={};
+  Object.keys(ICONS).forEach(k=>{
+    const usJ=jitter(usBase.slice().sort(()=>Math.random()-.5));
+    const cnJ=jitter(cnBase.slice().sort(()=>Math.random()-.5));
+    out[k]={
+      name:SECT_FULL[k]||k,
+      is_concept:isConcept(k),
+      a_share:{stocks:cnJ.map(s=>({code:s[0],name:s[1],price:s[2],change_pct:s[3],market_cap:Math.floor(s[4]),pe:+(10+Math.random()*50).toFixed(1)})),count:cnJ.length},
+      us:{stocks:usJ.map(s=>({code:s[0],name:s[1],price:s[2],change_pct:s[3],market_cap:Math.floor(s[4]),pe:+(15+Math.random()*40).toFixed(1)})),count:usJ.length}
+    };
+  });
+  return out;
+}
+
+loadData();
+</script>
+</body>
+</html>
