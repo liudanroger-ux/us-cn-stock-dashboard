@@ -14,7 +14,7 @@ A real-time comparison dashboard for US and Chinese stock market sector leaders,
 
 ## Live Demo
 
-[View Dashboard](https://YOUR_GITHUB_USERNAME.github.io/us-cn-stock-dashboard/)
+[View Dashboard](https://liudanroger-ux.github.io/us-cn-stock-dashboard/)
 
 ## Tech Stack
 
