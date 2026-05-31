@@ -297,6 +297,25 @@ body {
   .header { padding-top: max(12px, env(safe-area-inset-top)); }
   .sidebar { padding-top: env(safe-area-inset-top); }
 }
+
+/* ===== Refresh Button ===== */
+.refresh-btn {
+  padding: 5px 13px; background: rgba(79,140,255,.12);
+  border: 1px solid rgba(79,140,255,.3); color: var(--accent-blue);
+  border-radius: var(--radius-sm); cursor: pointer; font-size: 11px; font-weight: 600;
+  transition: all var(--transition); white-space: nowrap;
+}
+.refresh-btn:hover { background: rgba(79,140,255,.22); border-color: rgba(79,140,255,.5); }
+.refresh-btn:disabled { opacity: .5; cursor: not-allowed; }
+.refresh-btn.success { color: var(--accent-green); border-color: rgba(0,181,120,.4); background: rgba(0,181,120,.1); }
+.refresh-btn.error { color: var(--accent-red); border-color: rgba(255,77,90,.4); background: rgba(255,77,90,.1); }
+.refresh-toast {
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+  background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md);
+  padding: 10px 20px; font-size: 12px; z-index: 300; box-shadow: var(--shadow-lg);
+  opacity: 0; transition: opacity .3s ease; pointer-events: none;
+}
+.refresh-toast.show { opacity: 1; }
 </style>
 </head>
 <body>
@@ -310,6 +329,7 @@ body {
     <div class="header-stat"><div class="header-stat-value" id="totalStocks">-</div><div class="header-stat-label">股票总数</div></div>
     <div class="header-stat"><div class="header-stat-value" id="totalSectors">-</div><div class="header-stat-label">板块</div></div>
     <div class="update-time"><div class="update-dot"></div><span id="updateTime">加载中...</span></div>
+    <button id="refreshBtn" class="refresh-btn" onclick="refreshRealtime()">🔄 刷新行情</button>
   </div>
 </header>
 <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
@@ -341,6 +361,8 @@ body {
     <div id="modalAddedList" class="modal-added-list"></div>
   </div>
 </div>
+
+<div class="refresh-toast" id="refreshToast"></div>
 
 <script src="data.js"></script>
 <script>
@@ -704,6 +726,178 @@ function genDemo(){
 }
 
 loadData();
+
+/* ===== 实时行情刷新（腾讯财经 JSONP） ===== */
+
+/**
+ * 腾讯财经 API (qt.gtimg.cn) — 支持 A股 + 美股，JSONP 无 CORS 限制
+ * A股格式: v_sh600519="1~贵州茅台~600519~1790.00~1.50~0.08~..."
+ * 美股格式: v_usNVDA="1~英伟达~NVDA~100.50~1.50~1.52~..."
+ * parts[0]=状态(1正常) [1]=名称 [2]=代码 [3]=现价 [4]=涨跌额 [5]=涨跌幅(%)
+ */
+function fetchTencentQuotes(symbols) {
+  return new Promise(resolve => {
+    if (!symbols || symbols.length === 0) { resolve({}); return; }
+    const result = {};
+    // 每批最多80个（腾讯限制约100）
+    const batchSize = 80;
+    const batches = [];
+    for (let i = 0; i < symbols.length; i += batchSize) {
+      batches.push(symbols.slice(i, i + batchSize));
+    }
+    let done = 0;
+    batches.forEach(batch => {
+      const script = document.createElement('script');
+      script.src = `https://qt.gtimg.cn/q=${batch.join(',')}`;
+      script.onload = () => {
+        batch.forEach(sym => {
+          const raw = window['v_' + sym];
+          if (raw) {
+            try {
+              const data = raw.replace(/^"|"$/g, '');
+              const parts = data.split('~');
+              if (parts[0] === '1' && parts.length > 5) {
+                result[sym] = {
+                  name: parts[1],
+                  code: parts[2],
+                  price: parseFloat(parts[3]) || 0,
+                  change: parseFloat(parts[4]) || 0,
+                  change_pct: parseFloat(parts[5]) || 0
+                };
+              }
+            } catch(e) {}
+          }
+        });
+        done++;
+        if (done === batches.length) resolve(result);
+      };
+      script.onerror = () => {
+        done++;
+        if (done === batches.length) resolve(result);
+      };
+      document.body.appendChild(script);
+      setTimeout(() => { try { script.remove(); } catch(e) {} }, 3000);
+    });
+  });
+}
+
+/** 构建 A 股腾讯代码: 6开头→sh, 其他→sz */
+function cnToTencent(code) {
+  return (code.startsWith('6') || code.startsWith('9')) ? 'sh' + code : 'sz' + code;
+}
+
+/** 构建 US 股腾讯代码 */
+function usToTencent(code) {
+  return 'us' + code.toUpperCase();
+}
+
+/** Toast 通知 */
+function showToast(msg, duration) {
+  duration = duration || 3000;
+  const el = document.getElementById('refreshToast');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), duration);
+}
+
+/** 刷新当前板块的实时行情 */
+async function refreshRealtime() {
+  const btn = document.getElementById('refreshBtn');
+  if (!btn || btn.disabled) return;
+
+  const sectorKey = cur;
+  const sectorData = data[sectorKey];
+  if (!sectorData) { showToast('无板块数据'); return; }
+
+  btn.disabled = true;
+  btn.textContent = '⏳ 刷新中...';
+  btn.className = 'refresh-btn';
+
+  try {
+    // 收集当前板块的代码
+    const cnStocks = sectorData.a_share?.stocks || [];
+    const usStocks = sectorData.us?.stocks || [];
+
+    const cnSyms = cnStocks.map(s => cnToTencent(s.code));
+    const usSyms = usStocks.map(s => usToTencent(s.code));
+    const allSyms = [...cnSyms, ...usSyms];
+
+    if (allSyms.length === 0) {
+      btn.disabled = false;
+      btn.textContent = '🔄 刷新行情';
+      showToast('当前板块无股票');
+      return;
+    }
+
+    // 并行请求 A 股 + 美股
+    const [cnResult, usResult] = await Promise.all([
+      cnSyms.length > 0 ? fetchTencentQuotes(cnSyms) : Promise.resolve({}),
+      usSyms.length > 0 ? fetchTencentQuotes(usSyms) : Promise.resolve({})
+    ]);
+
+    // 更新 A 股数据
+    let cnUpdated = 0;
+    cnStocks.forEach(s => {
+      const sym = cnToTencent(s.code);
+      const r = cnResult[sym];
+      if (r && r.price > 0) {
+        s.price = r.price;
+        s.change_pct = r.change_pct;
+        cnUpdated++;
+      }
+    });
+
+    // 更新美股数据
+    let usUpdated = 0;
+    usStocks.forEach(s => {
+      const sym = usToTencent(s.code);
+      const r = usResult[sym];
+      if (r && r.price > 0) {
+        s.price = r.price;
+        s.change_pct = r.change_pct;
+        usUpdated++;
+      }
+    });
+
+    // 重新按涨跌幅排序
+    cnStocks.sort((a, b) => (b.change_pct || 0) - (a.change_pct || 0));
+    usStocks.sort((a, b) => (b.change_pct || 0) - (a.change_pct || 0));
+
+    // 重建当前面板 UI
+    rebuildPanel(sectorKey);
+
+    const total = cnUpdated + usUpdated;
+    if (total > 0) {
+      btn.className = 'refresh-btn success';
+      btn.textContent = `✅ 已刷新 ${total} 只`;
+      showToast(`行情已刷新：A 股 ${cnUpdated} 只 | 美股 ${usUpdated} 只`);
+    } else {
+      btn.className = 'refresh-btn error';
+      btn.textContent = '⚠️ 无数据';
+      showToast('未获取到新数据（可能非交易时间或 API 限速）');
+    }
+
+    // 3秒后恢复按钮
+    setTimeout(() => {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '🔄 刷新行情';
+        btn.className = 'refresh-btn';
+      }
+    }, 3000);
+
+  } catch(e) {
+    console.error('Refresh error:', e);
+    btn.className = 'refresh-btn error';
+    btn.textContent = '❌ 刷新失败';
+    showToast('刷新失败: ' + (e.message || '网络错误'));
+    setTimeout(() => {
+      if (btn) { btn.disabled = false; btn.textContent = '🔄 刷新行情'; btn.className = 'refresh-btn'; }
+    }, 3000);
+  }
+}
+
 </script>
 </body>
 </html>
