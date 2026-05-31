@@ -173,6 +173,69 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
+/* ===== 股票行可点击样式 ===== */
+.stock-table tbody tr.clickable { cursor: pointer; }
+.stock-table tbody tr.clickable:hover td { background: rgba(79,140,255,0.06); }
+.stock-name-link { text-decoration: none; color: inherit; }
+.stock-name-link:hover .stock-name { color: var(--accent-blue); text-decoration: underline; }
+
+/* ===== 编辑模式 ===== */
+.edit-btn {
+  display: flex; align-items: center; gap: 5px;
+  padding: 5px 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color); background: var(--bg-card);
+  color: var(--text-secondary); cursor: pointer; font-size: 11px;
+  transition: all var(--transition);
+}
+.edit-btn:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
+.edit-btn.active { border-color: var(--accent-orange); color: var(--accent-orange); background: rgba(255,159,67,.08); }
+.panel-actions { display: flex; align-items: center; gap: 8px; }
+.del-stock-btn {
+  width: 18px; height: 18px; border-radius: 50%; background: var(--accent-red);
+  color: white; border: none; cursor: pointer; font-size: 12px; line-height: 18px;
+  text-align: center; flex-shrink: 0; display: none; transition: opacity .15s;
+}
+.del-stock-btn:hover { opacity: .75; }
+.edit-mode .del-stock-btn { display: inline-flex; align-items: center; justify-content: center; }
+
+/* ===== 添加股票弹窗 ===== */
+.modal-overlay {
+  display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,.6); z-index: 500; align-items: center; justify-content: center;
+}
+.modal-overlay.open { display: flex; }
+.modal-box {
+  background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg);
+  padding: 20px 24px; width: min(420px, 92vw); max-height: 80vh; overflow-y: auto;
+  box-shadow: var(--shadow-lg); animation: fadeIn .2s ease;
+}
+.modal-title { font-size: 15px; font-weight: 700; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; }
+.modal-close { background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 20px; padding: 0 4px; }
+.modal-close:hover { color: var(--text-primary); }
+.modal-input-row { display: flex; gap: 8px; margin-bottom: 10px; }
+.modal-input {
+  flex: 1; background: var(--bg-secondary); border: 1px solid var(--border-color);
+  color: var(--text-primary); padding: 8px 12px; border-radius: var(--radius-sm);
+  font-size: 13px; outline: none;
+}
+.modal-input:focus { border-color: var(--accent-blue); }
+.modal-btn {
+  padding: 8px 14px; border-radius: var(--radius-sm); border: none;
+  background: var(--accent-blue); color: white; cursor: pointer; font-size: 12px; font-weight: 600;
+  white-space: nowrap;
+}
+.modal-btn:hover { opacity: .85; }
+.modal-hint { font-size: 10.5px; color: var(--text-muted); margin-bottom: 10px; line-height: 1.6; }
+.modal-added-list { margin-top: 10px; }
+.modal-added-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 10px; background: var(--bg-secondary); border-radius: var(--radius-sm);
+  margin-bottom: 5px; font-size: 12px;
+}
+.modal-added-name { font-weight: 600; }
+.modal-added-code { color: var(--text-muted); font-size: 10px; margin-left: 5px; }
+.modal-remove-btn { background: none; border: none; color: var(--accent-red); cursor: pointer; font-size: 16px; padding: 0 4px; }
+
 /* ===== Desktop (>=1200px) ===== */
 @media (min-width:1200px) {
   .header-subtitle { display: block; }
@@ -259,6 +322,26 @@ body {
 </div>
 <div id="loadingOverlay"><div class="spinner"></div><span>数据加载中...</span></div>
 
+<!-- 添加股票弹窗 -->
+<div class="modal-overlay" id="addStockModal">
+  <div class="modal-box">
+    <div class="modal-title">
+      <span id="modalTitle">添加股票</span>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <p class="modal-hint">
+      输入股票代码（A股：如 <b>300750</b>、<b>600519</b>；美股：如 <b>NVDA</b>、<b>AAPL</b>），
+      以及显示名称（选填）。添加后下次刷新数据时生效。
+    </p>
+    <div class="modal-input-row">
+      <input class="modal-input" id="inputCode" placeholder="股票代码（如 300750）" />
+      <input class="modal-input" id="inputName" placeholder="名称（选填）" style="max-width:120px" />
+      <button class="modal-btn" onclick="addStockFromModal()">添加</button>
+    </div>
+    <div id="modalAddedList" class="modal-added-list"></div>
+  </div>
+</div>
+
 <script src="data.js"></script>
 <script>
 /* ===== 配置 ===== */
@@ -268,7 +351,6 @@ const ICONS={
   "航天航空国防":"✈️","生物科技":"🧬","投资银行":"📈","通信设备":"📡",
   "电力":"⚡","电气设备":"🔌","黄金":"🥇","大卖场超市":"🏪",
   "食品饮料":"🍔","汽车":"🚗","工业机械":"🏭",
-  // 概念板块
   "AI硬件":"🤖","AI软件":"🧠","医药概念":"🏥","电气概念":"🔋"
 };
 const SECT_FULL={
@@ -280,16 +362,26 @@ const SECT_FULL={
   "通信设备":"通信设备","电力":"电力","电气设备":"电气部件与设备",
   "黄金":"黄金","大卖场超市":"大卖场与超市","食品饮料":"食品饮料",
   "汽车":"汽车","工业机械":"工业机械",
-  // 概念板块
   "AI硬件":"AI硬件产品及制造","AI软件":"AI软件应用及IT服务",
   "医药概念":"医药（中美可比）","电气概念":"电气设备（中美可比）"
 };
-// 概念板块列表
 const CONCEPT_KEYS=["AI硬件","AI软件","医药概念","电气概念"];
-// 行业板块列表（来自ICONS中不在CONCEPT_KEYS中的）
 const INDUSTRY_KEYS=Object.keys(ICONS).filter(k=>!CONCEPT_KEYS.includes(k));
 
-let data={},cur=null;
+let data={}, cur=null;
+// editMode: { sectorKey, market ('cn'|'us') }
+let editMode=null;
+// modalTarget: { sectorKey, market }
+let modalTarget=null;
+// customHidden: localStorage — 记录用户隐藏的股票 { sectorKey_market: [code,...] }
+const LS_HIDDEN='dashboard_hidden_v1';
+// customExtra: localStorage — 记录用户添加的股票 { sectorKey_market: [{code,name,price,change_pct,market_cap,pe},...] }
+const LS_EXTRA='dashboard_extra_v1';
+
+function loadHidden(){ try{ return JSON.parse(localStorage.getItem(LS_HIDDEN)||'{}'); }catch(e){ return {}; } }
+function saveHidden(h){ localStorage.setItem(LS_HIDDEN,JSON.stringify(h)); }
+function loadExtra(){ try{ return JSON.parse(localStorage.getItem(LS_EXTRA)||'{}'); }catch(e){ return {}; } }
+function saveExtra(e){ localStorage.setItem(LS_EXTRA,JSON.stringify(e)); }
 
 /* ===== 工具函数 ===== */
 function fmtMC(v){
@@ -302,11 +394,37 @@ function chgCls(v){ if(v>0) return 'up'; if(v<0) return 'down'; return ''; }
 function chgSign(v){ if(v>0) return '+'+v.toFixed(2)+'%'; if(v<0) return v.toFixed(2)+'%'; return '0.00%'; }
 function isConcept(k){ return CONCEPT_KEYS.includes(k); }
 
+/* ===== 行情跳转链接 ===== */
+function stockLink(code, market){
+  // market: 'cn' | 'us'
+  if(market==='cn'){
+    // 判断沪深
+    const prefix=code.startsWith('6')||code.startsWith('9')?'sh':'sz';
+    return `https://quote.eastmoney.com/${prefix}${code}.html`;
+  } else {
+    // 美股 → 雪球（对中国用户友好）
+    return `https://xueqiu.com/S/${code.toUpperCase()}`;
+  }
+}
+
 /* ===== 股票行渲染 ===== */
-function stockRow(s,i){
-  return `<tr>
+function stockRow(s, i, sectorKey, market, isEditMode){
+  const hidden=loadHidden();
+  const hKey=`${sectorKey}_${market}`;
+  if(!isEditMode && hidden[hKey] && hidden[hKey].includes(s.code)) return '';
+
+  const link=stockLink(s.code, market);
+  const delBtn=isEditMode
+    ? `<button class="del-stock-btn" title="隐藏此股" onclick="hideStock(event,'${sectorKey}','${market}','${s.code}')">×</button>`
+    : '';
+  return `<tr class="${isEditMode?'':'clickable'}" ${isEditMode?'':'onclick="window.open(\''+link+'\',\'_blank\')"'}>
     <td class="rank-cell ${i<3?'rank-'+(i+1):''}">${i+1}</td>
-    <td><span class="stock-name">${s.name||'-'}</span><span class="stock-code">${s.code||''}</span></td>
+    <td style="display:flex;align-items:center;gap:6px;min-height:36px">
+      ${delBtn}
+      <a href="${link}" target="_blank" class="stock-name-link" onclick="event.stopPropagation()">
+        <span class="stock-name">${s.name||'-'}</span><span class="stock-code">${s.code||''}</span>
+      </a>
+    </td>
     <td class="price-cell">${s.price?s.price.toFixed(2):'-'}</td>
     <td class="change-cell ${chgCls(s.change_pct)}">${chgSign(s.change_pct||0)}</td>
     <td class="market-cap-cell">${fmtMC(s.market_cap)}</td>
@@ -318,51 +436,150 @@ function stockRow(s,i){
 function buildPanel(key){
   const d=data[key];
   if(!d) return '';
-  const cn=d.a_share||{stocks:[],count:0};
-  const us=d.us||{stocks:[],count:0};
-  const cnUp=cn.stocks.filter(s=>s.change_pct>0).length;
-  const cnDown=cn.stocks.filter(s=>s.change_pct<0).length;
-  const usUp=us.stocks.filter(s=>s.change_pct>0).length;
-  const usDown=us.stocks.filter(s=>s.change_pct<0).length;
   const isConc=isConcept(key);
   const title=SECT_FULL[key]||key;
-
-  const cnRows=cn.stocks.length?cn.stocks.map((s,i)=>stockRow(s,i)).join(''):
-    `<tr><td colspan="6"><div class="empty-state"><div class="empty-state-icon">📊</div>暂无数据</div></td></tr>`;
-  const usRows=us.stocks.length?us.stocks.map((s,i)=>stockRow(s,i)).join(''):
-    `<tr><td colspan="6"><div class="empty-state"><div class="empty-state-icon">📊</div>暂无数据</div></td></tr>`;
-
   return `<div class="sector-content" data-sector="${key}">
     <div class="sector-title-bar">
       <span class="sector-title">${title}${isConc?'<span class="concept-tag">概念板块</span>':''}</span>
     </div>
     <div class="comparison-grid">
-      <div class="market-panel">
-        <div class="panel-header">
-          <span class="panel-title"><span class="panel-flag">🇨🇳</span>A股 · ${title}</span>
-          <span class="panel-stats">共 ${cn.count} 只 | <span class="up">涨 ${cnUp}</span> <span class="down">跌 ${cnDown}</span></span>
-        </div>
-        <div class="stock-table-wrap">
-          <table class="stock-table">
-            <thead><tr><th>#</th><th>股票</th><th>股价</th><th>涨跌</th><th>市值</th><th>PE</th></tr></thead>
-            <tbody>${cnRows}</tbody>
-          </table>
-        </div>
-      </div>
-      <div class="market-panel">
-        <div class="panel-header">
-          <span class="panel-title"><span class="panel-flag">🇺🇸</span>美股 · ${title}</span>
-          <span class="panel-stats">共 ${us.count} 只 | <span class="up">涨 ${usUp}</span> <span class="down">跌 ${usDown}</span></span>
-        </div>
-        <div class="stock-table-wrap">
-          <table class="stock-table">
-            <thead><tr><th>#</th><th>股票</th><th>股价</th><th>涨跌</th><th>市值</th><th>PE</th></tr></thead>
-            <tbody>${usRows}</tbody>
-          </table>
-        </div>
-      </div>
+      ${buildMarketPanel(key,'cn',d.a_share||{stocks:[],count:0},'🇨🇳','A股',title)}
+      ${buildMarketPanel(key,'us',d.us||{stocks:[],count:0},'🇺🇸','美股',title)}
     </div>
   </div>`;
+}
+
+function buildMarketPanel(sectorKey, market, sdata, flag, label, title){
+  const isEM=(editMode && editMode.sectorKey===sectorKey && editMode.market===market);
+  const hidden=loadHidden();
+  const extra=loadExtra();
+  const hKey=`${sectorKey}_${market}`;
+
+  // 合并原始数据 + 用户添加
+  let allStocks=[...(sdata.stocks||[])];
+  const extraStocks=extra[hKey]||[];
+  if(extraStocks.length>0){
+    const existCodes=new Set(allStocks.map(s=>s.code));
+    extraStocks.forEach(s=>{ if(!existCodes.has(s.code)) allStocks.push(s); });
+  }
+
+  // 过滤隐藏
+  if(!isEM){
+    const hiddenCodes=new Set(hidden[hKey]||[]);
+    allStocks=allStocks.filter(s=>!hiddenCodes.has(s.code));
+  }
+  const up=allStocks.filter(s=>s.change_pct>0).length;
+  const down=allStocks.filter(s=>s.change_pct<0).length;
+  const rows=allStocks.length
+    ? allStocks.map((s,i)=>stockRow(s,i,sectorKey,market,isEM)).join('')
+    : `<tr><td colspan="6"><div class="empty-state"><div class="empty-state-icon">📊</div>暂无数据</div></td></tr>`;
+
+  return `<div class="market-panel${isEM?' edit-mode':''}" id="panel_${sectorKey}_${market}">
+    <div class="panel-header">
+      <span class="panel-title"><span class="panel-flag">${flag}</span>${label} · ${title}</span>
+      <div class="panel-actions">
+        <span class="panel-stats">共 ${allStocks.length} 只 | <span class="up">涨 ${up}</span> <span class="down">跌 ${down}</span></span>
+        <button class="edit-btn${isEM?' active':''}" onclick="toggleEditMode('${sectorKey}','${market}')">${isEM?'✅ 完成':'✏️ 编辑'}</button>
+        ${isEM?`<button class="modal-btn" style="font-size:11px;padding:5px 10px" onclick="openAddModal('${sectorKey}','${market}')">+ 添加</button>`:''}
+      </div>
+    </div>
+    <div class="stock-table-wrap">
+      <table class="stock-table">
+        <thead><tr><th>#</th><th>股票</th><th>股价</th><th>涨跌</th><th>市值</th><th>PE</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+/* ===== 编辑模式切换 ===== */
+function toggleEditMode(sectorKey, market){
+  if(editMode && editMode.sectorKey===sectorKey && editMode.market===market){
+    editMode=null; // 关闭
+  } else {
+    editMode={sectorKey, market}; // 开启
+  }
+  rebuildPanel(sectorKey);
+}
+
+/* ===== 隐藏股票 ===== */
+function hideStock(evt, sectorKey, market, code){
+  evt.stopPropagation();
+  const hidden=loadHidden();
+  const key=`${sectorKey}_${market}`;
+  if(!hidden[key]) hidden[key]=[];
+  if(!hidden[key].includes(code)) hidden[key].push(code);
+  saveHidden(hidden);
+  rebuildPanel(sectorKey);
+}
+
+/* ===== 重建面板（局部刷新）===== */
+function rebuildPanel(key){
+  const container=document.querySelector(`.sector-content[data-sector="${key}"]`);
+  if(!container) return;
+  const wasActive=container.classList.contains('active');
+  const newHTML=buildPanel(key);
+  container.outerHTML=newHTML;
+  if(wasActive){
+    const el=document.querySelector(`.sector-content[data-sector="${key}"]`);
+    if(el) el.classList.add('active');
+  }
+  // 同步更新 summary
+  if(cur===key) updateSummary(key);
+}
+
+/* ===== 添加股票弹窗 ===== */
+function openAddModal(sectorKey, market){
+  modalTarget={sectorKey, market};
+  document.getElementById('modalTitle').textContent=`添加股票 — ${market==='cn'?'🇨🇳 A股':'🇺🇸 美股'} · ${sectorKey}`;
+  document.getElementById('inputCode').value='';
+  document.getElementById('inputName').value='';
+  renderModalList();
+  document.getElementById('addStockModal').classList.add('open');
+}
+function closeModal(){
+  document.getElementById('addStockModal').classList.remove('open');
+  modalTarget=null;
+  if(editMode) rebuildPanel(editMode.sectorKey);
+}
+function renderModalList(){
+  if(!modalTarget) return;
+  const {sectorKey,market}=modalTarget;
+  const extra=loadExtra();
+  const key=`${sectorKey}_${market}`;
+  const list=extra[key]||[];
+  const el=document.getElementById('modalAddedList');
+  if(list.length===0){ el.innerHTML='<div style="font-size:11px;color:var(--text-muted);padding:6px 0">暂无自定义添加的股票</div>'; return; }
+  el.innerHTML=list.map((s,i)=>`<div class="modal-added-item">
+    <span><span class="modal-added-name">${s.name||s.code}</span><span class="modal-added-code">${s.code}</span></span>
+    <button class="modal-remove-btn" title="移除" onclick="removeExtraStock(${i})">×</button>
+  </div>`).join('');
+}
+function addStockFromModal(){
+  if(!modalTarget) return;
+  const code=document.getElementById('inputCode').value.trim().toUpperCase();
+  if(!code){ alert('请输入股票代码'); return; }
+  const name=document.getElementById('inputName').value.trim()||code;
+  const {sectorKey,market}=modalTarget;
+  const extra=loadExtra();
+  const key=`${sectorKey}_${market}`;
+  if(!extra[key]) extra[key]=[];
+  // 重复检查
+  if(extra[key].some(s=>s.code===code)){ alert('该股票已存在'); return; }
+  extra[key].push({code,name,price:0,change_pct:0,market_cap:0,pe:0});
+  saveExtra(extra);
+  document.getElementById('inputCode').value='';
+  document.getElementById('inputName').value='';
+  renderModalList();
+}
+function removeExtraStock(idx){
+  if(!modalTarget) return;
+  const {sectorKey,market}=modalTarget;
+  const extra=loadExtra();
+  const key=`${sectorKey}_${market}`;
+  if(extra[key]) extra[key].splice(idx,1);
+  saveExtra(extra);
+  renderModalList();
 }
 
 /* ===== 切换板块 ===== */
@@ -374,8 +591,8 @@ function switchSector(key){
   if(nav) nav.classList.add('active');
   if(panel) panel.classList.add('active');
   cur=key;
+  editMode=null; // 切换板块时退出编辑
   updateSummary(key);
-  // 手机端切换后自动收起侧栏
   if(window.innerWidth<768) closeSidebar();
 }
 
@@ -399,23 +616,18 @@ function initDash(){
   const sBar=document.getElementById('summaryBar');
   const allKeys=[...INDUSTRY_KEYS,...CONCEPT_KEYS];
 
-  // Summary Bar
   sBar.innerHTML=`
     <div class="summary-card"><div class="summary-icon" style="background:rgba(79,140,255,.15)">🇨🇳</div><div class="summary-info"><h3>A股总市值</h3><div class="value" id="summaryMC_CN">-</div></div></div>
     <div class="summary-card"><div class="summary-icon" style="background:rgba(255,77,90,.15)">🇺🇸</div><div class="summary-info"><h3>美股总市值</h3><div class="value" id="summaryMC_US">-</div></div></div>
     <div class="summary-card"><div class="summary-icon" style="background:rgba(165,94,234,.15)">📋</div><div class="summary-info"><h3>A股数量</h3><div class="value" id="summaryCnt_CN">-</div></div></div>
     <div class="summary-card"><div class="summary-icon" style="background:rgba(46,216,163,.15)">🔝</div><div class="summary-info"><h3>美股数量</h3><div class="value" id="summaryCnt_US">-</div></div></div>`;
 
-  // Sidebar
   let navHtml='<div class="sidebar-header">行业板块</div>';
   let panelHtml='';
-  let firstKey=null;
 
   allKeys.forEach((k,i)=>{
     const d=data[k];
     const isConc=isConcept(k);
-    // 行业→概念分界线
-    if(!isConc && firstKey===null) firstKey=k;
     if(isConc && (i===0 || !isConcept(allKeys[i-1]))){
       navHtml+='<div class="concept-divider">概念板块</div>';
     }
@@ -429,13 +641,10 @@ function initDash(){
 
   if(allKeys.length>0) switchSector(allKeys[0]);
 
-  // Header stats
-  let totalStocks=0, industryCnt=0, conceptCnt=0;
+  let totalStocks=0;
   allKeys.forEach(k=>{ const d=data[k]; if(d) totalStocks+=(d.a_share?.count||0)+(d.us?.count||0); });
-  industryCnt=INDUSTRY_KEYS.length;
-  conceptCnt=CONCEPT_KEYS.length;
   document.getElementById('totalStocks').textContent=totalStocks;
-  document.getElementById('totalSectors').textContent=industryCnt+conceptCnt;
+  document.getElementById('totalSectors').textContent=INDUSTRY_KEYS.length+CONCEPT_KEYS.length;
   document.getElementById('loadingOverlay').style.display='none';
 }
 
