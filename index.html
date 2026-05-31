@@ -588,11 +588,53 @@ function addStockFromModal(){
   if(!extra[key]) extra[key]=[];
   // 重复检查
   if(extra[key].some(s=>s.code===code)){ alert('该股票已存在'); return; }
-  extra[key].push({code,name,price:0,change_pct:0,market_cap:0,pe:0});
+  // 先添加到列表（数据稍后由 fetchAndSaveStock 填充）
+  const newStock={code,name,price:0,change_pct:0,market_cap:0,pe:0};
+  extra[key].push(newStock);
   saveExtra(extra);
   document.getElementById('inputCode').value='';
   document.getElementById('inputName').value='';
   renderModalList();
+  rebuildPanel(sectorKey);
+  // 自动从腾讯API获取数据
+  fetchAndSaveStock(sectorKey, market, code, name);
+}
+
+/** 通过腾讯API获取单只股票实时数据，更新到 extra 和 data */
+async function fetchAndSaveStock(sectorKey, market, code, name){
+  const sym = market==='cn' ? cnToTencent(code) : usToTencent(code);
+  try {
+    const r = await fetchTencentQuotes([sym]);
+    const q = r[sym];
+    if(q && q.price>0){
+      // 更新 extra 中该股票的数据
+      const extra=loadExtra();
+      const key=`${sectorKey}_${market}`;
+      const s=extra[key]?.find(x=>x.code===code);
+      if(s){
+        s.price=q.price;
+        s.change_pct=q.change_pct;
+        if(q.name && (!name||name===code)) s.name=q.name;
+        saveExtra(extra);
+        rebuildPanel(sectorKey);
+        showToast(`${q.name} 已添加并获取数据`);
+      }
+      // 如果该股票也在 data 原始数据中，同步更新
+      const ds=data[sectorKey];
+      if(ds){
+        const stocks=ds[market==='cn'?'a_share':'us']?.stocks||[];
+        const orig=stocks.find(x=>x.code===code);
+        if(orig){
+          orig.price=q.price;
+          orig.change_pct=q.change_pct;
+        }
+      }
+    } else {
+      showToast(`未获取到 ${name}(${code}) 的数据`);
+    }
+  }catch(e){
+    console.warn('fetchAndSaveStock error:',e);
+  }
 }
 function removeExtraStock(idx){
   if(!modalTarget) return;
@@ -815,12 +857,18 @@ async function refreshRealtime() {
   btn.className = 'refresh-btn';
 
   try {
-    // 收集当前板块的代码
+    // 收集当前板块的代码（包括 data 原始 + extra 手动添加）
     const cnStocks = sectorData.a_share?.stocks || [];
     const usStocks = sectorData.us?.stocks || [];
+    const extra = loadExtra();
+    const extraCn = extra[`${sectorKey}_cn`] || [];
+    const extraUs = extra[`${sectorKey}_us`] || [];
 
     const cnSyms = cnStocks.map(s => cnToTencent(s.code));
     const usSyms = usStocks.map(s => usToTencent(s.code));
+    // 额外收集手动添加的股票
+    extraCn.forEach(s => { const sym = cnToTencent(s.code); if(!cnSyms.includes(sym)) cnSyms.push(sym); });
+    extraUs.forEach(s => { const sym = usToTencent(s.code); if(!usSyms.includes(sym)) usSyms.push(sym); });
     const allSyms = [...cnSyms, ...usSyms];
 
     if (allSyms.length === 0) {
@@ -848,7 +896,7 @@ async function refreshRealtime() {
       }
     });
 
-    // 更新美股数据
+    // 更新美股数据（data 原始）
     let usUpdated = 0;
     usStocks.forEach(s => {
       const sym = usToTencent(s.code);
@@ -859,6 +907,32 @@ async function refreshRealtime() {
         usUpdated++;
       }
     });
+
+    // 更新手动添加的股票（extra）
+    let extraUpdated = 0;
+    const cnExtra = extra[`${sectorKey}_cn`] || [];
+    const usExtra = extra[`${sectorKey}_us`] || [];
+    cnExtra.forEach(s => {
+      const sym = cnToTencent(s.code);
+      const r = cnResult[sym];
+      if (r && r.price > 0) {
+        s.price = r.price;
+        s.change_pct = r.change_pct;
+        if (r.name) s.name = r.name;
+        extraUpdated++;
+      }
+    });
+    usExtra.forEach(s => {
+      const sym = usToTencent(s.code);
+      const r = usResult[sym];
+      if (r && r.price > 0) {
+        s.price = r.price;
+        s.change_pct = r.change_pct;
+        if (r.name) s.name = r.name;
+        extraUpdated++;
+      }
+    });
+    if (extraUpdated > 0) saveExtra(extra);
 
     // 重新按涨跌幅排序
     cnStocks.sort((a, b) => (b.change_pct || 0) - (a.change_pct || 0));
@@ -898,6 +972,84 @@ async function refreshRealtime() {
   }
 }
 
-</script>
+/**
+ * 页面加载后自动静默修正所有板块的涨跌幅（用腾讯API数据覆盖异常值）
+ * 批量获取所有股票，一次性请求修正
+ */
+async function autoFixChangePct(){
+  const allKeys=[...INDUSTRY_KEYS,...CONCEPT_KEYS];
+
+  // 1. 一次性收集所有板块的所有代码
+  const allCnSyms = new Set();
+  const allUsSyms = new Set();
+  for(const key of allKeys){
+    const sectorData = data[key];
+    if(!sectorData) continue;
+    (sectorData.a_share?.stocks||[]).forEach(s => allCnSyms.add(cnToTencent(s.code)));
+    (sectorData.us?.stocks||[]).forEach(s => allUsSyms.add(usToTencent(s.code)));
+    const extra = loadExtra();
+    (extra[`${key}_cn`]||[]).forEach(s => allCnSyms.add(cnToTencent(s.code)));
+    (extra[`${key}_us`]||[]).forEach(s => allUsSyms.add(usToTencent(s.code)));
+  }
+
+  if(allCnSyms.size === 0 && allUsSyms.size === 0) return;
+
+  // 2. 批量请求（每批80个）
+  try {
+    const cnSyms = [...allCnSyms];
+    const usSyms = [...allUsSyms];
+    const cnBatches=[], usBatches=[];
+    for(let i=0;i<cnSyms.length;i+=80) cnBatches.push(cnSyms.slice(i,i+80));
+    for(let i=0;i<usSyms.length;i+=80) usBatches.push(usSyms.slice(i,i+80));
+
+    const allCn={}, allUs={};
+    for(const batch of cnBatches){
+      const r=await fetchTencentQuotes(batch);
+      Object.assign(allCn, r);
+      if(cnBatches.length>1) await new Promise(x=>setTimeout(x,200));
+    }
+    for(const batch of usBatches){
+      const r=await fetchTencentQuotes(batch);
+      Object.assign(allUs, r);
+      if(usBatches.length>1) await new Promise(x=>setTimeout(x,200));
+    }
+
+    // 3. 逐板块修正
+    let totalFixed = 0;
+    for(const key of allKeys){
+      const sectorData = data[key];
+      if(!sectorData) continue;
+      (sectorData.a_share?.stocks||[]).forEach(s => {
+        const sym=cnToTencent(s.code); const r=allCn[sym];
+        if(r && r.price>0){ if(s.change_pct!==r.change_pct) totalFixed++; s.price=r.price; s.change_pct=r.change_pct; }
+      });
+      (sectorData.us?.stocks||[]).forEach(s => {
+        const sym=usToTencent(s.code); const r=allUs[sym];
+        if(r && r.price>0){ if(s.change_pct!==r.change_pct) totalFixed++; s.price=r.price; s.change_pct=r.change_pct; }
+      });
+      // extra
+      const extra=loadExtra();
+      let extraChanged=false;
+      (extra[`${key}_cn`]||[]).forEach(s => {
+        const sym=cnToTencent(s.code); const r=allCn[sym];
+        if(r && r.price>0){ s.price=r.price; s.change_pct=r.change_pct; if(r.name) s.name=r.name; extraChanged=true; }
+      });
+      (extra[`${key}_us`]||[]).forEach(s => {
+        const sym=usToTencent(s.code); const r=allUs[sym];
+        if(r && r.price>0){ s.price=r.price; s.change_pct=r.change_pct; if(r.name) s.name=r.name; extraChanged=true; }
+      });
+      if(extraChanged) saveExtra(extra);
+    }
+    if(totalFixed > 0){
+      rebuildPanel(cur);
+      console.log(`[autoFix] 修正了 ${totalFixed} 只股票的涨跌幅`);
+    }
+  }catch(e){
+    console.warn('[autoFix] failed:', e);
+  }
+}
+
+// 页面加载完成后 1 秒自动修正涨跌幅
+setTimeout(() => { autoFixChangePct(); }, 1000);
 </body>
 </html>
