@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8">
+<title>Test - Data Loading</title>
+<style>
+body{font-family:system-ui;background:#0f1117;color:#e8eaed;padding:20px}
+.box{background:#1e2130;border-radius:8px;padding:16px;margin:12px 0}
+.up{color:#ff4d5a}.down{color:#00b578}
+table{width:100%;border-collapse:collapse}
+th,td{padding:6px 10px;text-align:right;border-bottom:1px solid #2a2d3a}
+th{text-align:left;color:#9aa0b0;font-size:12px}
+td{text-align:right;font-size:13px}
+</style>
+</head>
+<body>
+<h2>Test: Data Loading</h2>
+<div id="log"></div>
+<div id="content"></div>
+
+<script src="data.js" charset="UTF-8"></script>
+<script>
+const log = document.getElementById('log');
+function logMsg(msg, ok) {
+  log.innerHTML += '<div class="box" style="border-left:4px solid '+(ok?'#00b578':'#ff4d5a')+'">'+msg+'</div>';
+}
+
+// Test 1: Is SECTOR_DATA defined?
+if (typeof SECTOR_DATA === 'undefined') {
+  logMsg('FAIL: SECTOR_DATA is not defined. data.js failed to load.', false);
+} else {
+  logMsg('OK: SECTOR_DATA is defined', true);
+  
+  // Test 2: Has sectors?
+  if (!SECTOR_DATA.sectors) {
+    logMsg('FAIL: SECTOR_DATA has no .sectors', false);
+  } else {
+    const keys = Object.keys(SECTOR_DATA.sectors);
+    logMsg('OK: sectors found, count=' + keys.length, true);
+    logMsg('First 5 keys: ' + keys.slice(0,5).join(', '), true);
+    
+    // Test 3: Key matching
+    const expectedKeys = ['软件','半导体产品','半导体设备','电脑硬件','综合性银行'];
+    const matched = expectedKeys.filter(k => keys.includes(k));
+    logMsg('Key match: ' + matched.length + '/' + expectedKeys.length, matched.length === expectedKeys.length);
+    
+    // Test 4: Show first sector data
+    const firstKey = keys[0];
+    const sector = SECTOR_DATA.sectors[firstKey];
+    const cnStocks = sector.a_share?.stocks || [];
+    const usStocks = sector.us?.stocks || [];
+    logMsg('Sector "' + firstKey + '": A股 ' + cnStocks.length + '只, 美股 ' + usStocks.length + '只', true);
+    
+    // Render a simple table
+    let html = '<h3 style="margin-top:20px">' + firstKey + ' - 美股 (前5)</h3><table><tr><th>#</th><th>Name</th><th>Price</th><th>Change</th></tr>';
+    usStocks.slice(0,5).forEach((s,i) => {
+      const cls = s.change_pct > 0 ? 'up' : s.change_pct < 0 ? 'down' : '';
+      html += '<tr><td>'+(i+1)+'</td><td>'+s.name+' ('+s.code+')</td><td>'+s.price.toFixed(2)+'</td><td class="'+cls+'">'+(s.change_pct>0?'+':'')+s.change_pct.toFixed(2)+'%</td></tr>';
+    });
+    html += '</table>';
+    document.getElementById('content').innerHTML = html;
+  }
+}
+</script>
+</body>
+</html>

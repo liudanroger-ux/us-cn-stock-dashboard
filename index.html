@@ -364,9 +364,7 @@ body {
 
 <div class="refresh-toast" id="refreshToast"></div>
 
-<script>
-// data.js 将通过 fetch 以 UTF-8 加载，避免 <script> 标签的编码歧义
-</script>
+<script src="data.js" charset="UTF-8"></script>
 <script>
 /* ===== 配置 ===== */
 const ICONS={
@@ -1076,5 +1074,6 @@ async function autoFixChangePct(){
 
 // 页面加载完成后 1 秒自动修正涨跌幅
 setTimeout(() => { autoFixChangePct(); }, 1000);
+</script>
 </body>
 </html>
