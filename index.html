@@ -614,6 +614,8 @@ async function fetchAndSaveStock(sectorKey, market, code, name){
       if(s){
         s.price=q.price;
         s.change_pct=q.change_pct;
+        if(q.market_cap>0) s.market_cap=q.market_cap;
+        if(q.pe>0) s.pe=q.pe;
         if(q.name && (!name||name===code)) s.name=q.name;
         saveExtra(extra);
         rebuildPanel(sectorKey);
@@ -627,6 +629,8 @@ async function fetchAndSaveStock(sectorKey, market, code, name){
         if(orig){
           orig.price=q.price;
           orig.change_pct=q.change_pct;
+          if(q.market_cap>0) orig.market_cap=q.market_cap;
+          if(q.pe>0) orig.pe=q.pe;
         }
       }
     } else {
@@ -724,7 +728,15 @@ function closeSidebar(){
 
 /* ===== 数据加载 ===== */
 async function loadData(){
-  // 优先尝试 fetch data.js（确保 UTF-8 解码，不受 <script> 标签编码影响）
+  // 优先: <script src="data.js"> 已加载的全局 SECTOR_DATA（最可靠）
+  if(typeof SECTOR_DATA !== 'undefined' && SECTOR_DATA && SECTOR_DATA.sectors){
+    data=SECTOR_DATA.sectors;
+    document.getElementById('updateTime').textContent='更新于 '+(SECTOR_DATA.generated_time||SECTOR_DATA.generated_at||'--').replace('T',' ').substring(0,16);
+    initDash();
+    return;
+  }
+
+  // Fallback: fetch data.js（确保 UTF-8 解码）
   try{
     const resp=await fetch('data.js');
     if(resp.ok){
@@ -742,14 +754,6 @@ async function loadData(){
     }
   }catch(e){
     console.warn('Failed to fetch data.js:', e);
-  }
-
-  // Fallback: 检查全局 SECTOR_DATA（从 <script src> 加载时可用）
-  if(typeof SECTOR_DATA !== 'undefined' && SECTOR_DATA && SECTOR_DATA.sectors){
-    data=SECTOR_DATA.sectors;
-    document.getElementById('updateTime').textContent='更新于 '+(SECTOR_DATA.generated_time||SECTOR_DATA.generated_at||'--').replace('T',' ').substring(0,16);
-    initDash();
-    return;
   }
 
   // Fallback: 尝试 sector_data.json
@@ -796,9 +800,12 @@ loadData();
 
 /**
  * 腾讯财经 API (qt.gtimg.cn) — 支持 A股 + 美股，JSONP 无 CORS 限制
- * A股格式: v_sh600519="1~贵州茅台~600519~1790.00~1.50~0.08~..."
- * 美股格式: v_usNVDA="1~英伟达~NVDA~100.50~1.50~1.52~..."
- * parts[0]=状态(1正常) [1]=名称 [2]=代码 [3]=现价 [4]=涨跌额 [5]=涨跌幅(%)
+ * A股格式: v_sh600519="1~贵州茅台~600519~现价~昨收~今开~..."
+ *   [3]=现价 [4]=昨收 [31]=涨跌额 [32]=涨跌幅(%)
+ *   [44]=市值(亿元) [52]=PE(市盈率) [46]=PB
+ * 美股格式: v_usNVDA="200~英伟达~NVDA.OQ~现价~昨收~今开~..."
+ *   [3]=现价 [31]=涨跌额 [32]=涨跌幅(%)
+ *   [39]=PE(市盈率) [37]=总股本 [62]=总市值 [63]=流通市值
  */
 function fetchTencentQuotes(symbols) {
   return new Promise(resolve => {
@@ -821,14 +828,33 @@ function fetchTencentQuotes(symbols) {
             try {
               const data = raw.replace(/^"|"$/g, '');
               const parts = data.split('~');
-              if (parts[0] === '1' && parts.length > 5) {
-                result[sym] = {
+              // A股状态码=1, 美股状态码=200 或 51 等
+              if ((parts[0] === '1' || parseInt(parts[0]) > 100) && parts.length > 32) {
+                const isUS = sym.startsWith('us');
+                const price = parseFloat(parts[3]) || 0;
+                const changePct = parseFloat(parts[32]) || 0;
+                const changeAmt = parts[31] ? parseFloat(parts[31]) : 0;
+                const entry = {
                   name: parts[1],
                   code: parts[2],
-                  price: parseFloat(parts[3]) || 0,
-                  change: parseFloat(parts[4]) || 0,
-                  change_pct: parseFloat(parts[5]) || 0
+                  price: price,
+                  change: changeAmt,
+                  change_pct: changePct,
+                  market_cap: 0,
+                  pe: 0
                 };
+                if (isUS) {
+                  // 美股: [37]=总股本, [62]=总市值, [39]=PE
+                  const totalShares = parts.length > 62 ? parseFloat(parts[62]) : 0;
+                  entry.market_cap = totalShares > 0 ? Math.floor(totalShares) : 0;
+                  entry.pe = parts.length > 39 ? parseFloat(parts[39]) || 0 : 0;
+                } else {
+                  // A股: [44]=市值(亿元→元), [52]=PE
+                  const mcapYi = parts.length > 44 ? parseFloat(parts[44]) : 0;
+                  entry.market_cap = mcapYi > 0 ? Math.floor(mcapYi * 1e8) : 0;
+                  entry.pe = parts.length > 52 ? parseFloat(parts[52]) || 0 : 0;
+                }
+                result[sym] = entry;
               }
             } catch(e) {}
           }
@@ -915,6 +941,8 @@ async function refreshRealtime() {
       if (r && r.price > 0) {
         s.price = r.price;
         s.change_pct = r.change_pct;
+        if (r.market_cap > 0) s.market_cap = r.market_cap;
+        if (r.pe > 0) s.pe = r.pe;
         cnUpdated++;
       }
     });
@@ -927,6 +955,8 @@ async function refreshRealtime() {
       if (r && r.price > 0) {
         s.price = r.price;
         s.change_pct = r.change_pct;
+        if (r.market_cap > 0) s.market_cap = r.market_cap;
+        if (r.pe > 0) s.pe = r.pe;
         usUpdated++;
       }
     });
@@ -942,6 +972,8 @@ async function refreshRealtime() {
         s.price = r.price;
         s.change_pct = r.change_pct;
         if (r.name) s.name = r.name;
+        if (r.market_cap > 0) s.market_cap = r.market_cap;
+        if (r.pe > 0) s.pe = r.pe;
         extraUpdated++;
       }
     });
@@ -952,6 +984,8 @@ async function refreshRealtime() {
         s.price = r.price;
         s.change_pct = r.change_pct;
         if (r.name) s.name = r.name;
+        if (r.market_cap > 0) s.market_cap = r.market_cap;
+        if (r.pe > 0) s.pe = r.pe;
         extraUpdated++;
       }
     });
@@ -1044,22 +1078,22 @@ async function autoFixChangePct(){
       if(!sectorData) continue;
       (sectorData.a_share?.stocks||[]).forEach(s => {
         const sym=cnToTencent(s.code); const r=allCn[sym];
-        if(r && r.price>0){ if(s.change_pct!==r.change_pct) totalFixed++; s.price=r.price; s.change_pct=r.change_pct; }
+        if(r && r.price>0){ if(s.change_pct!==r.change_pct) totalFixed++; s.price=r.price; s.change_pct=r.change_pct; if(r.market_cap>0) s.market_cap=r.market_cap; if(r.pe>0) s.pe=r.pe; }
       });
       (sectorData.us?.stocks||[]).forEach(s => {
         const sym=usToTencent(s.code); const r=allUs[sym];
-        if(r && r.price>0){ if(s.change_pct!==r.change_pct) totalFixed++; s.price=r.price; s.change_pct=r.change_pct; }
+        if(r && r.price>0){ if(s.change_pct!==r.change_pct) totalFixed++; s.price=r.price; s.change_pct=r.change_pct; if(r.market_cap>0) s.market_cap=r.market_cap; if(r.pe>0) s.pe=r.pe; }
       });
       // extra
       const extra=loadExtra();
       let extraChanged=false;
       (extra[`${key}_cn`]||[]).forEach(s => {
         const sym=cnToTencent(s.code); const r=allCn[sym];
-        if(r && r.price>0){ s.price=r.price; s.change_pct=r.change_pct; if(r.name) s.name=r.name; extraChanged=true; }
+        if(r && r.price>0){ s.price=r.price; s.change_pct=r.change_pct; if(r.name) s.name=r.name; if(r.market_cap>0) s.market_cap=r.market_cap; if(r.pe>0) s.pe=r.pe; extraChanged=true; }
       });
       (extra[`${key}_us`]||[]).forEach(s => {
         const sym=usToTencent(s.code); const r=allUs[sym];
-        if(r && r.price>0){ s.price=r.price; s.change_pct=r.change_pct; if(r.name) s.name=r.name; extraChanged=true; }
+        if(r && r.price>0){ s.price=r.price; s.change_pct=r.change_pct; if(r.name) s.name=r.name; if(r.market_cap>0) s.market_cap=r.market_cap; if(r.pe>0) s.pe=r.pe; extraChanged=true; }
       });
       if(extraChanged) saveExtra(extra);
     }
