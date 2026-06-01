@@ -378,7 +378,8 @@ const ICONS={
   "综合性银行":"🏦","综合零售":"🛒","制药":"💊","石油天然气":"🛢️",
   "航天航空国防":"✈️","生物科技":"🧬","投资银行":"📈","通信设备":"📡",
   "电力":"⚡","电气设备":"🔌","黄金":"🥇","大卖场超市":"🏪",
-  "食品饮料":"🍔","汽车":"🚗",  "工业机械":"🏭","消费电子":"📱",
+  "食品饮料":"🍔","汽车":"🚗",  "工业机械":"🏭",  "消费电子":"📱",
+  "机器人概念":"🦾","固态电池概念":"🧪",
   "AI硬件":"🤖","AI软件":"🧠","医药概念":"🏥","电气概念":"🔋"
 };
 const SECT_FULL={
@@ -389,11 +390,13 @@ const SECT_FULL={
   "生物科技":"生物科技","投资银行":"投资银行与经纪业务（券商，信托等）",
   "通信设备":"通信设备","电力":"电力","电气设备":"电气部件与设备",
   "黄金":"黄金","大卖场超市":"大卖场与超市","食品饮料":"食品饮料",
-  "汽车":"汽车","工业机械":"工业机械","消费电子":"消费电子（智能手机、耳机、可穿戴、家电等）",
+  "汽车":"汽车","工业机械":"工业机械",  "消费电子":"消费电子（智能手机、耳机、可穿戴、家电等）",
+  "机器人概念":"机器人（人形机器人、工业机器人、服务机器人等）",
+  "固态电池概念":"固态电池（固态电解质、锂金属电池等）",
   "AI硬件":"AI硬件产品及制造","AI软件":"AI软件应用及IT服务",
   "医药概念":"医药（中美可比）","电气概念":"电气设备（中美可比）"
 };
-const CONCEPT_KEYS=["AI硬件","AI软件","医药概念","电气概念"];
+const CONCEPT_KEYS=["机器人概念","固态电池概念","AI硬件","AI软件","医药概念","电气概念"];
 const INDUSTRY_KEYS=Object.keys(ICONS).filter(k=>!CONCEPT_KEYS.includes(k));
 
 let data={}, cur=null;
@@ -421,7 +424,7 @@ function saveSectorOrder(order){ localStorage.setItem(LS_ORDER,JSON.stringify(or
 /** 获取显示顺序的板块 key 列表（尊重用户自定义排序） */
 function getOrderedKeys(){
   const saved=loadSectorOrder();
-  const defaultKeys=[...INDUSTRY_KEYS,...CONCEPT_KEYS];
+  const defaultKeys=[...CONCEPT_KEYS,...INDUSTRY_KEYS];
   if(!saved) return defaultKeys;
   // 合并：已保存的按顺序排，新增的追加
   const set=new Set(defaultKeys);
@@ -440,6 +443,12 @@ function fmtMC(v){
 function chgCls(v){ if(v>0) return 'up'; if(v<0) return 'down'; return ''; }
 function chgSign(v){ if(v>0) return '+'+v.toFixed(2)+'%'; if(v<0) return v.toFixed(2)+'%'; return '0.00%'; }
 function isConcept(k){ return CONCEPT_KEYS.includes(k); }
+
+/** 更新右上角时间戳 */
+function updateTimestamp(){
+  const now=new Date();
+  document.getElementById('updateTime').textContent='更新于 '+now.toLocaleTimeString('zh-CN');
+}
 
 /* ===== 行情跳转链接 ===== */
 function stockLink(code, market){
@@ -719,6 +728,7 @@ async function refreshSectorSilent(sectorKey){
     cnStocks.sort((a,b)=>(b.change_pct||0)-(a.change_pct||0));
     usStocks.sort((a,b)=>(b.change_pct||0)-(a.change_pct||0));
     rebuildPanel(sectorKey);
+    updateTimestamp();
     // 更新侧栏计数
     const navCount=document.querySelector(`.sector-nav-item[data-sector="${sectorKey}"] .sector-count`);
     if(navCount){
@@ -756,16 +766,16 @@ function initDash(){
     <div class="summary-card"><div class="summary-icon" style="background:rgba(165,94,234,.15)">📋</div><div class="summary-info"><h3>A股数量</h3><div class="value" id="summaryCnt_CN">-</div></div></div>
     <div class="summary-card"><div class="summary-icon" style="background:rgba(46,216,163,.15)">🔝</div><div class="summary-info"><h3>美股数量</h3><div class="value" id="summaryCnt_US">-</div></div></div>`;
 
-  let navHtml='<div class="sidebar-header">行业板块</div>';
+  let navHtml='<div class="concept-divider" style="border-top:none;margin-top:0">概念板块</div>';
   let panelHtml='';
-  let conceptStarted=false;
+  let industryStarted=false;
 
   allKeys.forEach((k,i)=>{
     const d=data[k];
     const isConc=isConcept(k);
-    if(isConc && !conceptStarted){
-      conceptStarted=true;
-      navHtml+='<div class="concept-divider">概念板块</div>';
+    if(!isConc && !industryStarted){
+      industryStarted=true;
+      navHtml+='<div class="sidebar-header">行业板块</div>';
     }
     const total=(d?(d.a_share?.count||0)+(d.us?.count||0):0);
     navHtml+=`<div class="sector-nav-item${isConc?' concept':''}${i===0?' active':''}" data-sector="${k}" draggable="true" onclick="switchSector('${k}')">
@@ -1144,6 +1154,7 @@ async function refreshRealtime() {
     if (total > 0) {
       btn.className = 'refresh-btn success';
       btn.textContent = `✅ 已刷新 ${total} 只`;
+      updateTimestamp();
       showToast(`行情已刷新：A 股 ${cnUpdated} 只 | 美股 ${usUpdated} 只`);
     } else {
       btn.className = 'refresh-btn error';
@@ -1241,6 +1252,7 @@ async function autoFixChangePct(){
     }
     if(totalFixed > 0){
       rebuildPanel(cur);
+      updateTimestamp();
       console.log(`[autoFix] 修正了 ${totalFixed} 只股票的涨跌幅`);
     }
   }catch(e){
