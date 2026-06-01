@@ -316,6 +316,12 @@ body {
   opacity: 0; transition: opacity .3s ease; pointer-events: none;
 }
 .refresh-toast.show { opacity: 1; }
+
+/* ===== Sidebar Drag & Drop ===== */
+.sector-nav-item[draggable="true"] { cursor: grab; user-select: none; }
+.sector-nav-item.dragging { opacity: 0.4; background: rgba(79,140,255,.05); }
+.sector-nav-item.drag-over { border-top: 2px solid var(--accent-blue); }
+.sidebar-drag-hint { font-size: 9px; color: var(--text-muted); padding: 4px 16px; font-style: italic; }
 </style>
 </head>
 <body>
@@ -372,7 +378,7 @@ const ICONS={
   "综合性银行":"🏦","综合零售":"🛒","制药":"💊","石油天然气":"🛢️",
   "航天航空国防":"✈️","生物科技":"🧬","投资银行":"📈","通信设备":"📡",
   "电力":"⚡","电气设备":"🔌","黄金":"🥇","大卖场超市":"🏪",
-  "食品饮料":"🍔","汽车":"🚗","工业机械":"🏭",
+  "食品饮料":"🍔","汽车":"🚗",  "工业机械":"🏭","消费电子":"📱",
   "AI硬件":"🤖","AI软件":"🧠","医药概念":"🏥","电气概念":"🔋"
 };
 const SECT_FULL={
@@ -383,7 +389,7 @@ const SECT_FULL={
   "生物科技":"生物科技","投资银行":"投资银行与经纪业务（券商，信托等）",
   "通信设备":"通信设备","电力":"电力","电气设备":"电气部件与设备",
   "黄金":"黄金","大卖场超市":"大卖场与超市","食品饮料":"食品饮料",
-  "汽车":"汽车","工业机械":"工业机械",
+  "汽车":"汽车","工业机械":"工业机械","消费电子":"消费电子（智能手机、耳机、可穿戴、家电等）",
   "AI硬件":"AI硬件产品及制造","AI软件":"AI软件应用及IT服务",
   "医药概念":"医药（中美可比）","电气概念":"电气设备（中美可比）"
 };
@@ -399,11 +405,30 @@ let modalTarget=null;
 const LS_HIDDEN='dashboard_hidden_v1';
 // customExtra: localStorage — 记录用户添加的股票 { sectorKey_market: [{code,name,price,change_pct,market_cap,pe},...] }
 const LS_EXTRA='dashboard_extra_v1';
+// customOrder: localStorage — 板块排序 ['软件','半导体产品',...]
+const LS_ORDER='dashboard_sector_order_v1';
 
 function loadHidden(){ try{ return JSON.parse(localStorage.getItem(LS_HIDDEN)||'{}'); }catch(e){ return {}; } }
 function saveHidden(h){ localStorage.setItem(LS_HIDDEN,JSON.stringify(h)); }
 function loadExtra(){ try{ return JSON.parse(localStorage.getItem(LS_EXTRA)||'{}'); }catch(e){ return {}; } }
 function saveExtra(e){ localStorage.setItem(LS_EXTRA,JSON.stringify(e)); }
+function loadSectorOrder(){
+  try{ const o=JSON.parse(localStorage.getItem(LS_ORDER)); if(Array.isArray(o)&&o.length>0) return o; }catch(e){}
+  return null;
+}
+function saveSectorOrder(order){ localStorage.setItem(LS_ORDER,JSON.stringify(order)); }
+
+/** 获取显示顺序的板块 key 列表（尊重用户自定义排序） */
+function getOrderedKeys(){
+  const saved=loadSectorOrder();
+  const defaultKeys=[...INDUSTRY_KEYS,...CONCEPT_KEYS];
+  if(!saved) return defaultKeys;
+  // 合并：已保存的按顺序排，新增的追加
+  const set=new Set(defaultKeys);
+  const ordered=saved.filter(k=>set.has(k));
+  defaultKeys.forEach(k=>{ if(!ordered.includes(k)) ordered.push(k); });
+  return ordered;
+}
 
 /* ===== 工具函数 ===== */
 function fmtMC(v){
@@ -650,7 +675,7 @@ function removeExtraStock(idx){
   renderModalList();
 }
 
-/* ===== 切换板块 ===== */
+/* ===== 切换板块（同时刷新行情） ===== */
 function switchSector(key){
   document.querySelectorAll('.sector-nav-item').forEach(el=>el.classList.remove('active'));
   document.querySelectorAll('.sector-content').forEach(el=>el.classList.remove('active'));
@@ -662,6 +687,47 @@ function switchSector(key){
   editMode=null; // 切换板块时退出编辑
   updateSummary(key);
   if(window.innerWidth<768) closeSidebar();
+  // 切换时自动刷新该板块行情
+  refreshSectorSilent(key);
+}
+
+/** 静默刷新指定板块行情（不弹 toast） */
+async function refreshSectorSilent(sectorKey){
+  const sectorData=data[sectorKey];
+  if(!sectorData) return;
+  try {
+    const cnStocks=sectorData.a_share?.stocks||[];
+    const usStocks=sectorData.us?.stocks||[];
+    const extra=loadExtra();
+    const extraCn=extra[`${sectorKey}_cn`]||[];
+    const extraUs=extra[`${sectorKey}_us`]||[];
+    const cnSyms=cnStocks.map(s=>cnToTencent(s.code));
+    const usSyms=usStocks.map(s=>usToTencent(s.code));
+    extraCn.forEach(s=>{const sym=cnToTencent(s.code);if(!cnSyms.includes(sym))cnSyms.push(sym);});
+    extraUs.forEach(s=>{const sym=usToTencent(s.code);if(!usSyms.includes(sym))usSyms.push(sym);});
+    if(cnSyms.length===0&&usSyms.length===0) return;
+    const [cnResult,usResult]=await Promise.all([
+      cnSyms.length>0?fetchTencentQuotes(cnSyms):Promise.resolve({}),
+      usSyms.length>0?fetchTencentQuotes(usSyms):Promise.resolve({})
+    ]);
+    cnStocks.forEach(s=>{const sym=cnToTencent(s.code);const r=cnResult[sym];if(r&&r.price>0){s.price=r.price;s.change_pct=r.change_pct;if(r.market_cap>0)s.market_cap=r.market_cap;if(r.pe>0)s.pe=r.pe;}});
+    usStocks.forEach(s=>{const sym=usToTencent(s.code);const r=usResult[sym];if(r&&r.price>0){s.price=r.price;s.change_pct=r.change_pct;if(r.market_cap>0)s.market_cap=r.market_cap;if(r.pe>0)s.pe=r.pe;}});
+    const cnEx=extra[`${sectorKey}_cn`]||[];
+    const usEx=extra[`${sectorKey}_us`]||[];
+    cnEx.forEach(s=>{const sym=cnToTencent(s.code);const r=cnResult[sym];if(r&&r.price>0){s.price=r.price;s.change_pct=r.change_pct;if(r.name)s.name=r.name;if(r.market_cap>0)s.market_cap=r.market_cap;if(r.pe>0)s.pe=r.pe;}});
+    usEx.forEach(s=>{const sym=usToTencent(s.code);const r=usResult[sym];if(r&&r.price>0){s.price=r.price;s.change_pct=r.change_pct;if(r.name)s.name=r.name;if(r.market_cap>0)s.market_cap=r.market_cap;if(r.pe>0)s.pe=r.pe;}});
+    cnStocks.sort((a,b)=>(b.change_pct||0)-(a.change_pct||0));
+    usStocks.sort((a,b)=>(b.change_pct||0)-(a.change_pct||0));
+    rebuildPanel(sectorKey);
+    // 更新侧栏计数
+    const navCount=document.querySelector(`.sector-nav-item[data-sector="${sectorKey}"] .sector-count`);
+    if(navCount){
+      const total=(cnStocks.length||0)+(usStocks.length||0);
+      navCount.textContent=total;
+    }
+  }catch(e){
+    console.warn('Silent refresh error:',e);
+  }
 }
 
 function updateSummary(key){
@@ -682,7 +748,7 @@ function initDash(){
   const sidebar=document.getElementById('sidebar');
   const panels=document.getElementById('sectorPanels');
   const sBar=document.getElementById('summaryBar');
-  const allKeys=[...INDUSTRY_KEYS,...CONCEPT_KEYS];
+  const allKeys=getOrderedKeys();
 
   sBar.innerHTML=`
     <div class="summary-card"><div class="summary-icon" style="background:rgba(79,140,255,.15)">🇨🇳</div><div class="summary-info"><h3>A股总市值</h3><div class="value" id="summaryMC_CN">-</div></div></div>
@@ -692,20 +758,26 @@ function initDash(){
 
   let navHtml='<div class="sidebar-header">行业板块</div>';
   let panelHtml='';
+  let conceptStarted=false;
 
   allKeys.forEach((k,i)=>{
     const d=data[k];
     const isConc=isConcept(k);
-    if(isConc && (i===0 || !isConcept(allKeys[i-1]))){
+    if(isConc && !conceptStarted){
+      conceptStarted=true;
       navHtml+='<div class="concept-divider">概念板块</div>';
     }
     const total=(d?(d.a_share?.count||0)+(d.us?.count||0):0);
-    navHtml+=`<div class="sector-nav-item${isConc?' concept':''}${i===0?' active':''}" data-sector="${k}" onclick="switchSector('${k}')">
+    navHtml+=`<div class="sector-nav-item${isConc?' concept':''}${i===0?' active':''}" data-sector="${k}" draggable="true" onclick="switchSector('${k}')">
       <span class="sector-icon">${ICONS[k]||'📊'}</span><span class="sector-label">${k}</span><span class="sector-count">${total}</span></div>`;
     panelHtml+=buildPanel(k);
   });
+  navHtml+='<div class="sidebar-drag-hint">拖拽可调整板块顺序</div>';
   sidebar.innerHTML=navHtml;
   panels.innerHTML=panelHtml;
+
+  // 初始化拖拽排序
+  initSectorDragDrop(sidebar);
 
   if(allKeys.length>0) switchSector(allKeys[0]);
 
@@ -714,6 +786,70 @@ function initDash(){
   document.getElementById('totalStocks').textContent=totalStocks;
   document.getElementById('totalSectors').textContent=INDUSTRY_KEYS.length+CONCEPT_KEYS.length;
   document.getElementById('loadingOverlay').style.display='none';
+}
+
+/* ===== 侧栏拖拽排序 ===== */
+function initSectorDragDrop(sidebar){
+  const items=sidebar.querySelectorAll('.sector-nav-item[draggable="true"]');
+  let dragItem=null;
+  items.forEach(item=>{
+    item.addEventListener('dragstart',e=>{
+      dragItem=item;
+      item.classList.add('dragging');
+      e.dataTransfer.effectAllowed='move';
+      e.dataTransfer.setData('text/plain',item.dataset.sector);
+    });
+    item.addEventListener('dragend',()=>{
+      item.classList.remove('dragging');
+      items.forEach(i=>i.classList.remove('drag-over'));
+      dragItem=null;
+      // 保存新顺序
+      const navItems=[...sidebar.querySelectorAll('.sector-nav-item[draggable="true"]')];
+      const newOrder=navItems.map(i=>i.dataset.sector);
+      saveSectorOrder(newOrder);
+      // 重建面板区域保持同步
+      rebuildAllPanels();
+    });
+    item.addEventListener('dragover',e=>{
+      e.preventDefault();
+      e.dataTransfer.dropEffect='move';
+      if(item!==dragItem){
+        item.classList.add('drag-over');
+      }
+    });
+    item.addEventListener('dragleave',()=>item.classList.remove('drag-over'));
+    item.addEventListener('drop',e=>{
+      e.preventDefault();
+      item.classList.remove('drag-over');
+      if(!dragItem || item===dragItem) return;
+      // 插入到目标前面
+      const parent=item.parentNode;
+      const allItems=[...parent.querySelectorAll('.sector-nav-item[draggable="true"]')];
+      const dragIdx=allItems.indexOf(dragItem);
+      const dropIdx=allItems.indexOf(item);
+      if(dragIdx<dropIdx){
+        parent.insertBefore(dragItem,item);
+      } else {
+        parent.insertBefore(dragItem,item.nextSibling);
+      }
+    });
+  });
+}
+
+/** 重建所有面板（排序变化后） */
+function rebuildAllPanels(){
+  const panels=document.getElementById('sectorPanels');
+  const allKeys=getOrderedKeys();
+  const activeKey=cur;
+  let panelHtml='';
+  allKeys.forEach(k=>{
+    panelHtml+=buildPanel(k);
+  });
+  panels.innerHTML=panelHtml;
+  if(activeKey){
+    const el=document.querySelector(`.sector-content[data-sector="${activeKey}"]`);
+    if(el) el.classList.add('active');
+  }
 }
 
 /* ===== 侧栏控制（手机端） ===== */
@@ -997,6 +1133,12 @@ async function refreshRealtime() {
 
     // 重建当前面板 UI
     rebuildPanel(sectorKey);
+    // 更新侧栏计数
+    const navCount=document.querySelector(`.sector-nav-item[data-sector="${sectorKey}"] .sector-count`);
+    if(navCount){
+      const total=(cnStocks.length||0)+(usStocks.length||0);
+      navCount.textContent=total;
+    }
 
     const total = cnUpdated + usUpdated;
     if (total > 0) {
@@ -1034,7 +1176,7 @@ async function refreshRealtime() {
  * 批量获取所有股票，一次性请求修正
  */
 async function autoFixChangePct(){
-  const allKeys=[...INDUSTRY_KEYS,...CONCEPT_KEYS];
+  const allKeys=getOrderedKeys();
 
   // 1. 一次性收集所有板块的所有代码
   const allCnSyms = new Set();
