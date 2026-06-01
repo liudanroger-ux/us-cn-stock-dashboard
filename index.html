@@ -380,7 +380,7 @@ const ICONS={
   "电力":"⚡","电气设备":"🔌","黄金":"🥇","大卖场超市":"🏪",
   "食品饮料":"🍔","汽车":"🚗",  "工业机械":"🏭",  "消费电子":"📱",
   "机器人概念":"🦾","固态电池概念":"🧪",
-  "AI硬件":"🤖","AI软件":"🧠","医药概念":"🏥","电气概念":"🔋"
+  "AI硬件":"🤖","AI软件":"🧠","创新药概念":"💊"
 };
 const SECT_FULL={
   "软件":"软件（系统软件，应用软件）","半导体产品":"半导体产品","半导体设备":"半导体设备",
@@ -393,10 +393,10 @@ const SECT_FULL={
   "汽车":"汽车","工业机械":"工业机械",  "消费电子":"消费电子（智能手机、耳机、可穿戴、家电等）",
   "机器人概念":"机器人（人形机器人、工业机器人、服务机器人等）",
   "固态电池概念":"固态电池（固态电解质、锂金属电池等）",
-  "AI硬件":"AI硬件产品及制造","AI软件":"AI软件应用及IT服务",
-  "医药概念":"医药（中美可比）","电气概念":"电气设备（中美可比）"
+  "AI硬件":"AI硬件产品及制造","AI软件":"AI智能体与AI软件（AI Agent、AI办公、AI营销、AI金融等）",
+  "创新药概念":"创新药（抗癌药、单抗、CAR-T、减肥药/GLP-1等）"
 };
-const CONCEPT_KEYS=["机器人概念","固态电池概念","AI硬件","AI软件","医药概念","电气概念"];
+const CONCEPT_KEYS=["机器人概念","固态电池概念","AI硬件","AI软件","创新药概念"];
 const INDUSTRY_KEYS=Object.keys(ICONS).filter(k=>!CONCEPT_KEYS.includes(k));
 
 let data={}, cur=null;
@@ -518,6 +518,8 @@ function buildMarketPanel(sectorKey, market, sdata, flag, label, title){
     const existCodes=new Set(allStocks.map(s=>s.code));
     extraStocks.forEach(s=>{ if(!existCodes.has(s.code)) allStocks.push(s); });
   }
+  // 按涨跌幅降序排序（含手动添加的股票）
+  allStocks.sort((a,b)=>(b.change_pct||0)-(a.change_pct||0));
 
   // 过滤隐藏
   if(!isEM){
