@@ -1347,12 +1347,6 @@ async function refreshRealtime() {
 
     // 重建当前面板 UI
     rebuildPanel(sectorKey);
-    // 更新侧栏计数
-    const navCount=document.querySelector(`.sector-nav-item[data-sector="${sectorKey}"] .sector-count`);
-    if(navCount){
-      const total=(cnStocks.length||0)+(usStocks.length||0);
-      navCount.textContent=total;
-    }
 
     const total = cnUpdated + usUpdated;
     if (total > 0) {
