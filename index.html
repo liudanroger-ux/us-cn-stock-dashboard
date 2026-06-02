@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -335,6 +335,7 @@ body {
     <div class="header-stat"><div class="header-stat-value" id="totalStocks">-</div><div class="header-stat-label">股票总数</div></div>
     <div class="header-stat"><div class="header-stat-value" id="totalSectors">-</div><div class="header-stat-label">板块</div></div>
     <div class="update-time"><div class="update-dot"></div><span id="updateTime">加载中...</span></div>
+    <div id="syncStatus" style="font-size:14px;cursor:pointer;margin:0 6px" onclick="openSyncSettings()" title="云端同步状态"></div>
     <button id="refreshBtn" class="refresh-btn" onclick="refreshRealtime()">🔄 刷新行情</button>
   </div>
 </header>
@@ -412,14 +413,116 @@ const LS_EXTRA='dashboard_extra_v1';
 const LS_ORDER='dashboard_sector_order_v1';
 
 function loadHidden(){ try{ return JSON.parse(localStorage.getItem(LS_HIDDEN)||'{}'); }catch(e){ return {}; } }
-function saveHidden(h){ localStorage.setItem(LS_HIDDEN,JSON.stringify(h)); }
+function saveHidden(h){ localStorage.setItem(LS_HIDDEN,JSON.stringify(h)); saveCloudPrefs(); }
 function loadExtra(){ try{ return JSON.parse(localStorage.getItem(LS_EXTRA)||'{}'); }catch(e){ return {}; } }
-function saveExtra(e){ localStorage.setItem(LS_EXTRA,JSON.stringify(e)); }
+function saveExtra(e){ localStorage.setItem(LS_EXTRA,JSON.stringify(e)); saveCloudPrefs(); }
 function loadSectorOrder(){
   try{ const o=JSON.parse(localStorage.getItem(LS_ORDER)); if(Array.isArray(o)&&o.length>0) return o; }catch(e){}
   return null;
 }
-function saveSectorOrder(order){ localStorage.setItem(LS_ORDER,JSON.stringify(order)); }
+function saveSectorOrder(order){ localStorage.setItem(LS_ORDER,JSON.stringify(order)); saveCloudPrefs(); }
+/* ===== Cloud Sync (npoint.io) ===== */
+const CLOUD_URL='https://api.npoint.io/49d62708e1f25dc72f6d';
+let cloudApiKey=localStorage.getItem('dashboard_cloud_key')||'';
+let cloudSyncStatus='idle';
+let cloudPrefs=null;
+
+async function loadCloudPrefs(){
+  try{
+    cloudSyncStatus='syncing'; updateSyncUI();
+    const resp=await fetch(CLOUD_URL);
+    if(!resp.ok) throw new Error('http'+resp.status);
+    const cloud=await resp.json();
+    cloudPrefs=cloud;
+    if(cloud.hidden) localStorage.setItem(LS_HIDDEN,JSON.stringify(cloud.hidden));
+    if(cloud.extra) localStorage.setItem(LS_EXTRA,JSON.stringify(cloud.extra));
+    if(Array.isArray(cloud.order)&&cloud.order.length>0) localStorage.setItem(LS_ORDER,JSON.stringify(cloud.order));
+    cloudSyncStatus='synced';
+  }catch(e){
+    console.warn('[Cloud] Load failed:',e);
+    cloudSyncStatus='error';
+  }
+  updateSyncUI();
+}
+
+async function saveCloudPrefs(){
+  if(!cloudApiKey){ cloudSyncStatus='nokey'; updateSyncUI(); return; }
+  try{
+    cloudSyncStatus='syncing'; updateSyncUI();
+    const payload={hidden:loadHidden(),extra:loadExtra(),order:loadSectorOrder()||[]};
+    const resp=await fetch(CLOUD_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-Npoint-Api-Key':cloudApiKey},
+      body:JSON.stringify(payload)
+    });
+    if(!resp.ok) throw new Error('http'+resp.status);
+    cloudSyncStatus='synced';
+  }catch(e){
+    console.warn('[Cloud] Save failed:',e);
+    cloudSyncStatus='error';
+  }
+  updateSyncUI();
+}
+
+function updateSyncUI(){
+  const el=document.getElementById('syncStatus');
+  if(!el) return;
+  const map={idle:'☁️',syncing:'⏳',synced:'☁️ ✓',error:'⚠️',nokey:'🔒'};
+  el.textContent=map[cloudSyncStatus]||'☁️';
+  const tips={idle:'云端同步空闲',syncing:'同步中...',synced:'已同步到云端 ✓',error:'同步失败（检查网络或 API Key）',nokey:'未配置 API Key，仅保存在本机'};
+  el.title=tips[cloudSyncStatus]||'';
+}
+
+function openSyncSettings(){
+  document.getElementById('inputApiKey').value=cloudApiKey;
+  document.getElementById('syncSettingsModal').classList.add('open');
+}
+function closeSyncSettings(){ document.getElementById('syncSettingsModal').classList.remove('open'); }
+function saveApiKey(){
+  const key=document.getElementById('inputApiKey').value.trim();
+  cloudApiKey=key;
+  localStorage.setItem('dashboard_cloud_key',key);
+  closeSyncSettings();
+  showToast('API Key 已保存，正在测试同步...');
+  saveCloudPrefs();
+}
+
+function clearCloudKey(){
+  cloudApiKey='';
+  localStorage.removeItem('dashboard_cloud_key');
+  showToast('API Key 已清除，将仅本地保存');
+  closeSyncSettings();
+}
+/** 手动触发一次云端同步 */
+function manualSync(){
+  showToast('正在从云端同步...');
+  loadCloudPrefs().then(()=>{
+    // 重新初始化看板以应用云端偏好
+    const allKeys=getOrderedKeys();
+    if(allKeys.length>0){
+      // 重建侧栏和面板
+      const sidebar=document.getElementById('sidebar');
+      const panels=document.getElementById('sectorPanels');
+      let navHtml='<div class="concept-divider" style="border-top:none;margin-top:0">概念板块</div>';
+      let panelHtml='';
+      let industryStarted=false;
+      allKeys.forEach((k,i)=>{
+        const d=data[k];
+        const isConc=isConcept(k);
+        if(!isConc&&!industryStarted){ industryStarted=true; navHtml+='<div class="sidebar-header">行业板块</div>'; }
+        const total=(d?(d.a_share?.count||0)+(d.us?.count||0):0);
+        navHtml+=`<div class="sector-nav-item${isConc?' concept':''}" data-sector="${k}" draggable="true" onclick="switchSector('${k}')"><span class="sector-icon">${ICONS[k]||'📊'}</span><span class="sector-label">${k}</span><span class="sector-count">${total}</span></div>`;
+        panelHtml+=buildPanel(k);
+      });
+      navHtml+='<div class="sidebar-drag-hint">拖拽可调整板块顺序</div>';
+      sidebar.innerHTML=navHtml;
+      panels.innerHTML=panelHtml;
+      initSectorDragDrop(sidebar);
+      switchSector(allKeys[0]);
+    }
+    showToast('云端同步完成！');
+  });
+}
 
 /** 获取显示顺序的板块 key 列表（尊重用户自定义排序） */
 function getOrderedKeys(){
@@ -876,6 +979,8 @@ function closeSidebar(){
 
 /* ===== 数据加载 ===== */
 async function loadData(){
+  // 优先从云端加载偏好设置
+  await loadCloudPrefs();
   // 优先: <script src="data.js"> 已加载的全局 SECTOR_DATA（最可靠）
   if(typeof SECTOR_DATA !== 'undefined' && SECTOR_DATA && SECTOR_DATA.sectors){
     data=SECTOR_DATA.sectors;
