@@ -945,16 +945,15 @@ async function refreshSectorSilent(sectorKey){
 }
 
 function updateSummary(key){
-  const d=data[key];
-  if(!d) return;
-  const cn=d.a_share||{stocks:[]};
-  const us=d.us||{stocks:[]};
-  const cnMC=cn.stocks.reduce((s,x)=>s+(x.market_cap||0),0);
-  const usMC=us.stocks.reduce((s,x)=>s+(x.market_cap||0),0);
+  if(!data[key]) return;
+  const cnStocks=getActualStocks(key,'cn');
+  const usStocks=getActualStocks(key,'us');
+  const cnMC=cnStocks.reduce((s,x)=>s+(x.market_cap||0),0);
+  const usMC=usStocks.reduce((s,x)=>s+(x.market_cap||0),0);
   document.getElementById('summaryMC_CN').textContent=fmtMC(cnMC);
   document.getElementById('summaryMC_US').textContent=fmtMC(usMC);
-  document.getElementById('summaryCnt_CN').textContent=cn.stocks.length+' 只';
-  document.getElementById('summaryCnt_US').textContent=us.stocks.length+' 只';
+  document.getElementById('summaryCnt_CN').textContent=cnStocks.length+' 只';
+  document.getElementById('summaryCnt_US').textContent=usStocks.length+' 只';
 }
 
 /* ===== 初始化看板 ===== */
