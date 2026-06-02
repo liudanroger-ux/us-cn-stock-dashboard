@@ -565,7 +565,7 @@ function manualSync(){
         const d=data[k];
         const isConc=isConcept(k);
         if(!isConc&&!industryStarted){ industryStarted=true; navHtml+='<div class="sidebar-header">行业板块</div>'; }
-        const total=(d?(d.a_share?.count||0)+(d.us?.count||0):0);
+        const total=getActualStocks(k,'cn').length+getActualStocks(k,'us').length;
         navHtml+=`<div class="sector-nav-item${isConc?' concept':''}" data-sector="${k}" draggable="true" onclick="switchSector('${k}')"><span class="sector-icon">${ICONS[k]||'📊'}</span><span class="sector-label">${k}</span><span class="sector-count">${total}</span></div>`;
         panelHtml+=buildPanel(k);
       });
@@ -730,6 +730,42 @@ function hideStock(evt, sectorKey, market, code){
 }
 
 /* ===== 重建面板（局部刷新）===== */
+
+function getActualStocks(sectorKey, market){
+  const d=data[sectorKey];
+  if(!d) return [];
+  const hidden=loadHidden();
+  const extra=loadExtra();
+  const hKey=sectorKey+'_'+market;
+  const sdata=market==='cn'?(d.a_share||{stocks:[]}):(d.us||{stocks:[]});
+  let all=[...(sdata.stocks||[])];
+  const extraStocks=extra[hKey]||[];
+  if(extraStocks.length>0){
+    const existCodes=new Set(all.map(s=>s.code));
+    extraStocks.forEach(s=>{ if(!existCodes.has(s.code)) all.push(s); });
+  }
+  const hiddenCodes=new Set(hidden[hKey]||[]);
+  return all.filter(s=>!hiddenCodes.has(s.code));
+}
+
+function updateSidebarCount(key){
+  const navEl=document.querySelector('.sector-nav-item[data-sector="'+key+'"]');
+  if(!navEl) return;
+  const cntEl=navEl.querySelector('.sector-count');
+  if(!cntEl) return;
+  const cn=getActualStocks(key,'cn').length;
+  const us=getActualStocks(key,'us').length;
+  cntEl.textContent=cn+us;
+}
+
+function updateTotalStocks(){
+  let total=0;
+  getOrderedKeys().forEach(k=>{
+    total+=getActualStocks(k,'cn').length+getActualStocks(k,'us').length;
+  });
+  document.getElementById('totalStocks').textContent=total;
+}
+
 function rebuildPanel(key){
   const container=document.querySelector(`.sector-content[data-sector="${key}"]`);
   if(!container) return;
@@ -742,6 +778,14 @@ function rebuildPanel(key){
   }
   // 同步更新 summary
   if(cur===key) updateSummary(key);
+  // 更新侧栏板块计数和头部总数
+  updateSidebarCount(key);
+  updateTotalStocks();
+  // 更新摘要栏 A股/美股数量
+  if(cur===key){
+    document.getElementById('summaryCnt_CN').textContent=getActualStocks(key,'cn').length+' 只';
+    document.getElementById('summaryCnt_US').textContent=getActualStocks(key,'us').length+' 只';
+  }
 }
 
 /* ===== 添加股票弹窗 ===== */
@@ -937,7 +981,7 @@ function initDash(){
       industryStarted=true;
       navHtml+='<div class="sidebar-header">行业板块</div>';
     }
-    const total=(d?(d.a_share?.count||0)+(d.us?.count||0):0);
+    const total=getActualStocks(k,'cn').length+getActualStocks(k,'us').length;
     navHtml+=`<div class="sector-nav-item${isConc?' concept':''}${i===0?' active':''}" data-sector="${k}" draggable="true" onclick="switchSector('${k}')">
       <span class="sector-icon">${ICONS[k]||'📊'}</span><span class="sector-label">${k}</span><span class="sector-count">${total}</span></div>`;
     panelHtml+=buildPanel(k);
@@ -952,7 +996,7 @@ function initDash(){
   if(allKeys.length>0) switchSector(allKeys[0]);
 
   let totalStocks=0;
-  allKeys.forEach(k=>{ const d=data[k]; if(d) totalStocks+=(d.a_share?.count||0)+(d.us?.count||0); });
+  allKeys.forEach(k=>{ totalStocks+=getActualStocks(k,'cn').length+getActualStocks(k,'us').length; });
   document.getElementById('totalStocks').textContent=totalStocks;
   document.getElementById('totalSectors').textContent=INDUSTRY_KEYS.length+CONCEPT_KEYS.length;
   document.getElementById('loadingOverlay').style.display='none';
@@ -1014,12 +1058,18 @@ function rebuildAllPanels(){
   let panelHtml='';
   allKeys.forEach(k=>{
     panelHtml+=buildPanel(k);
+    updateSidebarCount(k);
   });
   panels.innerHTML=panelHtml;
   if(activeKey){
-    const el=document.querySelector(`.sector-content[data-sector="${activeKey}"]`);
+    const el=document.querySelector('.sector-content[data-sector="'+activeKey+'"]');
     if(el) el.classList.add('active');
+    updateSummary(activeKey);
+    document.getElementById('summaryCnt_CN').textContent=getActualStocks(activeKey,'cn').length+' 只';
+    document.getElementById('summaryCnt_US').textContent=getActualStocks(activeKey,'us').length+' 只';
   }
+  updateTotalStocks();
+}
 }
 
 /* ===== 侧栏控制（手机端） ===== */
