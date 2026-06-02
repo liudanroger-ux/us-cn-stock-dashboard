@@ -933,12 +933,6 @@ async function refreshSectorSilent(sectorKey){
     usStocks.sort((a,b)=>(b.change_pct||0)-(a.change_pct||0));
     rebuildPanel(sectorKey);
     updateTimestamp();
-    // 更新侧栏计数
-    const navCount=document.querySelector(`.sector-nav-item[data-sector="${sectorKey}"] .sector-count`);
-    if(navCount){
-      const total=(cnStocks.length||0)+(usStocks.length||0);
-      navCount.textContent=total;
-    }
   }catch(e){
     console.warn('Silent refresh error:',e);
   }
