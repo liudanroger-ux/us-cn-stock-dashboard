@@ -322,6 +322,32 @@ body {
 .sector-nav-item.dragging { opacity: 0.4; background: rgba(79,140,255,.05); }
 .sector-nav-item.drag-over { border-top: 2px solid var(--accent-blue); }
 .sidebar-drag-hint { font-size: 9px; color: var(--text-muted); padding: 4px 16px; font-style: italic; }
+
+/* ===== 自定义板块管理 ===== */
+.sidebar-add-btn {
+  margin: 10px 12px; padding: 8px 14px; border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-color); background: transparent;
+  color: var(--text-muted); cursor: pointer; font-size: 12px; text-align: center;
+  transition: all var(--transition); width: calc(100% - 24px);
+}
+.sidebar-add-btn:hover { border-color: var(--accent-blue); color: var(--accent-blue); background: rgba(79,140,255,.06); }
+.custom-sector-tag {
+  font-size: 9px; background: rgba(79,140,255,.12); color: var(--accent-blue);
+  padding: 1px 6px; border-radius: 8px; margin-left: 4px; font-weight: 600;
+}
+.sector-nav-item .sector-del-btn {
+  display: none; background: none; border: none; color: var(--accent-red);
+  cursor: pointer; font-size: 14px; padding: 0 2px; opacity: .6;
+}
+.sector-nav-item:hover .sector-del-btn { display: inline; }
+.sector-nav-item .sector-del-btn:hover { opacity: 1; }
+.sector-nav-item .sector-edit-btn {
+  display: none; background: none; border: none; color: var(--text-muted);
+  cursor: pointer; font-size: 11px; padding: 0 2px; opacity: .6;
+}
+.sector-nav-item:hover .sector-edit-btn { display: inline; }
+.sector-nav-item .sector-edit-btn:hover { opacity: 1; color: var(--accent-blue); }
+
 </style>
 </head>
 <body>
@@ -366,6 +392,29 @@ body {
       <button class="modal-btn" onclick="addStockFromModal()">添加</button>
     </div>
     <div id="modalAddedList" class="modal-added-list"></div>
+  </div>
+</div>
+
+
+<!-- 自定义板块管理弹窗 -->
+<div class="modal-overlay" id="sectorManagerModal">
+  <div class="modal-box" style="width:min(500px,94vw)">
+    <div class="modal-title">
+      <span id="sectorManagerTitle">板块管理</span>
+      <button class="modal-close" onclick="closeSectorManager()">×</button>
+    </div>
+    <div id="sectorManagerBody"></div>
+  </div>
+</div>
+
+<!-- 编辑板块弹窗 -->
+<div class="modal-overlay" id="editSectorModal">
+  <div class="modal-box" style="width:min(500px,94vw)">
+    <div class="modal-title">
+      <span id="editSectorTitle">新建板块</span>
+      <button class="modal-close" onclick="closeEditSector()">×</button>
+    </div>
+    <div id="editSectorBody"></div>
   </div>
 </div>
 
@@ -474,6 +523,7 @@ async function loadCloudPrefs(){
     if(cloud.hidden) localStorage.setItem(LS_HIDDEN,JSON.stringify(cloud.hidden));
     if(cloud.extra) localStorage.setItem(LS_EXTRA,JSON.stringify(cloud.extra));
     if(Array.isArray(cloud.order)&&cloud.order.length>0) localStorage.setItem(LS_ORDER,JSON.stringify(cloud.order));
+    if(Array.isArray(cloud.custom_sectors)) localStorage.setItem(LS_CUSTOM_SECTORS,JSON.stringify(cloud.custom_sectors));
     cloudSyncStatus='synced';
   }catch(e){
     console.warn('[Cloud] Load failed:',e);
@@ -486,7 +536,7 @@ async function saveCloudPrefs(){
   if(!cloudApiKey||!CLOUD_URL){ cloudSyncStatus='nokey'; updateSyncUI(); return; }
   try{
     cloudSyncStatus='syncing'; updateSyncUI();
-    const payload={hidden:loadHidden(),extra:loadExtra(),order:loadSectorOrder()||[]};
+    const payload={hidden:loadHidden(),extra:loadExtra(),order:loadSectorOrder()||[],custom_sectors:loadCustomSectors()};
     const resp=await fetch(CLOUD_URL,{
       method:'PUT',
       headers:{'Content-Type':'application/json','X-Master-Key':cloudApiKey},
@@ -553,7 +603,14 @@ function manualSync(){
   showToast('正在从云端同步...');
   loadCloudPrefs().then(()=>{
     // 重新初始化看板以应用云端偏好
-    const allKeys=getOrderedKeys();
+    // 将自定义板块注册到 data 中（用于面板构建）
+  const customs=loadCustomSectors();
+  customs.forEach(cs=>{
+    if(!data[cs.key]){
+      data[cs.key]={name:cs.key,is_concept:cs.type==='concept',a_share:{stocks:[],count:0},us:{stocks:[],count:0}};
+    }
+  });
+  const allKeys=getOrderedKeys();
     if(allKeys.length>0){
       // 重建侧栏和面板
       const sidebar=document.getElementById('sidebar');
@@ -569,7 +626,9 @@ function manualSync(){
         navHtml+=`<div class="sector-nav-item${isConc?' concept':''}" data-sector="${k}" draggable="true" onclick="switchSector('${k}')"><span class="sector-icon">${ICONS[k]||'📊'}</span><span class="sector-label">${k}</span><span class="sector-count">${total}</span></div>`;
         panelHtml+=buildPanel(k);
       });
-      navHtml+='<div class="sidebar-drag-hint">拖拽可调整板块顺序</div>';
+      navHtml+='<div class="sidebar-add-btn" onclick="openSectorManager()">➕ 新建板块</div>';
+  navHtml+='<div class="sidebar-add-btn" onclick="openSectorManager()">➕ 新建板块</div>';
+  navHtml+='<div class="sidebar-drag-hint">拖拽可调整板块顺序</div>';
       sidebar.innerHTML=navHtml;
       panels.innerHTML=panelHtml;
       initSectorDragDrop(sidebar);
@@ -582,12 +641,14 @@ function manualSync(){
 /** 获取显示顺序的板块 key 列表（尊重用户自定义排序） */
 function getOrderedKeys(){
   const saved=loadSectorOrder();
+  const customs=loadCustomSectors();
   const defaultKeys=[...CONCEPT_KEYS,...INDUSTRY_KEYS];
-  if(!saved) return defaultKeys;
-  // 合并：已保存的按顺序排，新增的追加
-  const set=new Set(defaultKeys);
+  const customKeys=customs.map(s=>s.key);
+  const allKeys=[...defaultKeys,...customKeys];
+  if(!saved) return allKeys;
+  const set=new Set(allKeys);
   const ordered=saved.filter(k=>set.has(k));
-  defaultKeys.forEach(k=>{ if(!ordered.includes(k)) ordered.push(k); });
+  allKeys.forEach(k=>{ if(!ordered.includes(k)) ordered.push(k); });
   return ordered;
 }
 
@@ -600,7 +661,7 @@ function fmtMC(v){
 }
 function chgCls(v){ if(v>0) return 'up'; if(v<0) return 'down'; return ''; }
 function chgSign(v){ if(v>0) return '+'+v.toFixed(2)+'%'; if(v<0) return v.toFixed(2)+'%'; return '0.00%'; }
-function isConcept(k){ return CONCEPT_KEYS.includes(k); }
+function isConcept(k){ return isConceptEx(k); }
 
 /** 更新右上角时间戳 */
 function updateTimestamp(){
@@ -648,6 +709,8 @@ function stockRow(s, i, sectorKey, market, isEditMode){
 
 /* ===== 面板构建 ===== */
 function buildPanel(key){
+  // 自定义板块走 buildPanelEx
+  if(isCustomSector(key)) return buildPanelEx(key);
   const d=data[key];
   if(!d) return '';
   const isConc=isConcept(key);
@@ -730,6 +793,7 @@ function hideStock(evt, sectorKey, market, code){
 /* ===== 重建面板（局部刷新）===== */
 
 function getActualStocks(sectorKey, market){
+  if(isCustomSector(sectorKey)) return getActualStocksEx(sectorKey,market);
   const d=data[sectorKey];
   if(!d) return [];
   const hidden=loadHidden();
@@ -904,6 +968,29 @@ function switchSector(key){
 
 /** 静默刷新指定板块行情（不弹 toast） */
 async function refreshSectorSilent(sectorKey){
+  // 自定义板块：从 customSectors 获取数据
+  if(isCustomSector(sectorKey)){
+    const cs=getCustomSectorDef(sectorKey);
+    if(!cs) return;
+    try{
+      const cnSs=(cs.stocks.cn||[]).map(s=>cnToTencent(s.code));
+      const usSs=(cs.stocks.us||[]).map(s=>usToTencent(s.code));
+      if(cnSs.length===0&&usSs.length===0) return;
+      const[cnR,usR]=await Promise.all([
+        cnSs.length>0?fetchTencentQuotes(cnSs):Promise.resolve({}),
+        usSs.length>0?fetchTencentQuotes(usSs):Promise.resolve({})
+      ]);
+      const customs=loadCustomSectors();
+      const sec=customs.find(s=>s.key===sectorKey);
+      if(!sec) return;
+      (sec.stocks.cn||[]).forEach(s=>{const sym=cnToTencent(s.code);const r=cnR[sym];if(r&&r.price>0){s.price=r.price;s.change_pct=r.change_pct;if(r.name)s.name=r.name;if(r.market_cap>0)s.market_cap=r.market_cap;if(r.pe>0)s.pe=r.pe;}});
+      (sec.stocks.us||[]).forEach(s=>{const sym=usToTencent(s.code);const r=usR[sym];if(r&&r.price>0){s.price=r.price;s.change_pct=r.change_pct;if(r.name)s.name=r.name;if(r.market_cap>0)s.market_cap=r.market_cap;if(r.pe>0)s.pe=r.pe;}});
+      saveCustomSectors(customs);
+      rebuildPanel(sectorKey);
+      updateTimestamp();
+    }catch(e){console.warn('Custom refresh error:',e);}
+    return;
+  }
   const sectorData=data[sectorKey];
   if(!sectorData) return;
   try {
@@ -937,9 +1024,9 @@ async function refreshSectorSilent(sectorKey){
 }
 
 function updateSummary(key){
-  if(!data[key]) return;
   const cnStocks=getActualStocks(key,'cn');
   const usStocks=getActualStocks(key,'us');
+  if(cnStocks.length===0 && usStocks.length===0) return;
   const cnMC=cnStocks.reduce((s,x)=>s+(x.market_cap||0),0);
   const usMC=usStocks.reduce((s,x)=>s+(x.market_cap||0),0);
   document.getElementById('summaryMC_CN').textContent=fmtMC(cnMC);
@@ -953,6 +1040,13 @@ function initDash(){
   const sidebar=document.getElementById('sidebar');
   const panels=document.getElementById('sectorPanels');
   const sBar=document.getElementById('summaryBar');
+  // 将自定义板块注册到 data 中（用于面板构建）
+  const customs=loadCustomSectors();
+  customs.forEach(cs=>{
+    if(!data[cs.key]){
+      data[cs.key]={name:cs.key,is_concept:cs.type==='concept',a_share:{stocks:[],count:0},us:{stocks:[],count:0}};
+    }
+  });
   const allKeys=getOrderedKeys();
 
   sBar.innerHTML=`
@@ -973,8 +1067,10 @@ function initDash(){
       navHtml+='<div class="sidebar-header">行业板块</div>';
     }
     const total=getActualStocks(k,'cn').length+getActualStocks(k,'us').length;
+    const custTag=isCustomSector(k)?'<span class="custom-sector-tag">自定义</span>':'';
+    const secIcon=getSectorIcon(k);
     navHtml+=`<div class="sector-nav-item${isConc?' concept':''}${i===0?' active':''}" data-sector="${k}" draggable="true" onclick="switchSector('${k}')">
-      <span class="sector-icon">${ICONS[k]||'📊'}</span><span class="sector-label">${k}</span><span class="sector-count">${total}</span></div>`;
+      <span class="sector-icon">${secIcon}</span><span class="sector-label">${k}${custTag}</span><span class="sector-count">${total}</span></div>`;
     panelHtml+=buildPanel(k);
   });
   navHtml+='<div class="sidebar-drag-hint">拖拽可调整板块顺序</div>';
@@ -989,7 +1085,7 @@ function initDash(){
   let totalStocks=0;
   allKeys.forEach(k=>{ totalStocks+=getActualStocks(k,'cn').length+getActualStocks(k,'us').length; });
   document.getElementById('totalStocks').textContent=totalStocks;
-  document.getElementById('totalSectors').textContent=INDUSTRY_KEYS.length+CONCEPT_KEYS.length;
+  document.getElementById('totalSectors').textContent=allKeys.length;
   document.getElementById('loadingOverlay').style.display='none';
 }
 
@@ -1044,6 +1140,13 @@ function initSectorDragDrop(sidebar){
 /** 重建所有面板（排序变化后） */
 function rebuildAllPanels(){
   const panels=document.getElementById('sectorPanels');
+  // 将自定义板块注册到 data 中（用于面板构建）
+  const customs=loadCustomSectors();
+  customs.forEach(cs=>{
+    if(!data[cs.key]){
+      data[cs.key]={name:cs.key,is_concept:cs.type==='concept',a_share:{stocks:[],count:0},us:{stocks:[],count:0}};
+    }
+  });
   const allKeys=getOrderedKeys();
   const activeKey=cur;
   let panelHtml='';
@@ -1141,6 +1244,494 @@ function genDemo(){
   });
   return out;
 }
+
+/* ===== 自定义板块管理 ===== */
+const LS_CUSTOM_SECTORS = 'dashboard_custom_sectors_v1';
+
+function loadCustomSectors() {
+  try { return JSON.parse(localStorage.getItem(LS_CUSTOM_SECTORS) || '[]'); }
+  catch(e) { return []; }
+}
+function saveCustomSectors(arr) {
+  localStorage.setItem(LS_CUSTOM_SECTORS, JSON.stringify(arr));
+  saveCloudPrefs();
+}
+
+/** 获取全部板块 key 列表（原有 + 自定义），尊重用户排序 */
+function getAllOrderedKeys() {
+  const saved = loadSectorOrder();
+  // 原有板块
+  const defaultKeys = [...CONCEPT_KEYS, ...INDUSTRY_KEYS];
+  // 自定义板块
+  const customs = loadCustomSectors();
+  const customKeys = customs.map(s => s.key);
+
+  const allKeys = [...defaultKeys, ...customKeys];
+
+  if (!saved) return allKeys;
+  // 合并排序
+  const allSet = new Set(allKeys);
+  const ordered = saved.filter(k => allSet.has(k));
+  allKeys.forEach(k => { if (!ordered.includes(k)) ordered.push(k); });
+  return ordered;
+}
+
+/** 判断是否为自定义板块 */
+function isCustomSector(key) {
+  return loadCustomSectors().some(s => s.key === key);
+}
+
+/** 获取自定义板块定义 */
+function getCustomSectorDef(key) {
+  return loadCustomSectors().find(s => s.key === key) || null;
+}
+
+/** 判断自定义板块是否为概念类型 */
+function isConceptEx(key) {
+  if (CONCEPT_KEYS.includes(key)) return true;
+  const cs = getCustomSectorDef(key);
+  return cs ? cs.type === 'concept' : false;
+}
+
+/* ===== 板块管理弹窗 ===== */
+function openSectorManager() {
+  renderSectorManager();
+  document.getElementById('sectorManagerModal').classList.add('open');
+}
+function closeSectorManager() {
+  document.getElementById('sectorManagerModal').classList.remove('open');
+}
+
+function renderSectorManager() {
+  const customs = loadCustomSectors();
+  const body = document.getElementById('sectorManagerBody');
+  if (customs.length === 0) {
+    body.innerHTML = `
+      <div style="text-align:center;padding:30px 0;color:var(--text-muted)">
+        <div style="font-size:36px;margin-bottom:10px">📋</div>
+        <div>暂无自定义板块</div>
+        <div style="font-size:11px;margin-top:6px">点击下方按钮创建新板块</div>
+      </div>
+      <div style="text-align:center;margin-top:10px">
+        <button class="modal-btn" style="padding:10px 24px;font-size:13px" onclick="openEditSector(null)">➕ 新建板块</button>
+      </div>`;
+    return;
+  }
+  let html = '<div style="margin-bottom:14px;display:flex;justify-content:flex-end"><button class="modal-btn" onclick="openEditSector(null)">➕ 新建板块</button></div>';
+  html += customs.map((s, i) => `
+    <div style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--bg-secondary);border-radius:var(--radius-sm);margin-bottom:6px">
+      <span style="font-size:20px">${s.icon || '📊'}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:600">${s.key}</div>
+        <div style="font-size:11px;color:var(--text-muted)">${s.type === 'concept' ? '概念板块' : '行业板块'} · A股 ${(s.stocks.cn||[]).length} 只 · 美股 ${(s.stocks.us||[]).length} 只</div>
+      </div>
+      <button onclick="openEditSector(${i})" style="padding:5px 10px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:6px;color:var(--accent-blue);cursor:pointer;font-size:11px">✏️ 编辑</button>
+      <button onclick="deleteCustomSector(${i})" style="padding:5px 10px;background:var(--bg-card);border:1px solid rgba(255,77,90,.3);border-radius:6px;color:var(--accent-red);cursor:pointer;font-size:11px">🗑️ 删除</button>
+    </div>
+  `).join('');
+  body.innerHTML = html;
+}
+
+function deleteCustomSector(idx) {
+  const customs = loadCustomSectors();
+  if (idx < 0 || idx >= customs.length) return;
+  const name = customs[idx].key;
+  if (!confirm('确定删除板块 "' + name + '" 吗？该板块内的股票配置将一并删除。')) return;
+  customs.splice(idx, 1);
+  saveCustomSectors(customs);
+  // 如果当前正在查看该板块，切换到第一个板块
+  const allKeys = getAllOrderedKeys();
+  if (cur === name && allKeys.length > 0) {
+    rebuildFullDashboard();
+    switchSector(allKeys[0]);
+  } else {
+    rebuildFullDashboard();
+  }
+  renderSectorManager();
+  showToast('已删除板块 "' + name + '"');
+}
+
+/* ===== 编辑/新建板块弹窗 ===== */
+let editingSectorIdx = null; // null = 新建, number = 编辑索引
+
+function openEditSector(idx) {
+  closeSectorManager();
+  editingSectorIdx = idx;
+  const customs = loadCustomSectors();
+  const isEdit = idx !== null && idx >= 0;
+  const sec = isEdit ? customs[idx] : { key: '', type: 'industry', icon: '📊', stocks: { cn: [], us: [] } };
+
+  document.getElementById('editSectorTitle').textContent = isEdit ? '编辑板块' : '新建板块';
+  renderEditSectorBody(sec);
+  document.getElementById('editSectorModal').classList.add('open');
+}
+
+function closeEditSector() {
+  document.getElementById('editSectorModal').classList.remove('open');
+  editingSectorIdx = null;
+}
+
+function renderEditSectorBody(sec) {
+  const body = document.getElementById('editSectorBody');
+  const cnStocks = sec.stocks.cn || [];
+  const usStocks = sec.stocks.us || [];
+
+  body.innerHTML = `
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <div style="flex:1;min-width:120px">
+        <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">板块名称</label>
+        <input id="es_name" class="modal-input" value="${sec.key}" placeholder="如：新能源" style="width:100%" />
+      </div>
+      <div style="width:100px">
+        <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">图标 Emoji</label>
+        <input id="es_icon" class="modal-input" value="${sec.icon || '📊'}" style="width:100%;text-align:center;font-size:18px" />
+      </div>
+      <div style="width:120px">
+        <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">板块类型</label>
+        <select id="es_type" style="width:100%;padding:8px;border-radius:6px;background:var(--bg-secondary);border:1px solid var(--border-color);color:var(--text-primary);font-size:13px">
+          <option value="industry"${sec.type !== 'concept' ? ' selected' : ''}>行业板块</option>
+          <option value="concept"${sec.type === 'concept' ? ' selected' : ''}>概念板块</option>
+        </select>
+      </div>
+    </div>
+    ${editingSectorIdx !== null ? `
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <button onclick="saveEditSector()" class="modal-btn" style="flex:1;padding:10px">💾 保存修改</button>
+    </div>` : `
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <button onclick="saveNewSector()" class="modal-btn" style="flex:1;padding:10px">✅ 创建板块</button>
+    </div>`}
+
+    <!-- A股股票列表 -->
+    <div style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <span style="font-size:13px;font-weight:600">🇨🇳 A股 (${cnStocks.length} 只)</span>
+        <button onclick="addStockToEditSector('cn')" class="modal-btn" style="font-size:10px;padding:4px 8px">+ 添加</button>
+      </div>
+      <div id="es_cn_stocks">
+        ${renderEditStockList(cnStocks, 'cn')}
+      </div>
+    </div>
+
+    <!-- 美股股票列表 -->
+    <div style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <span style="font-size:13px;font-weight:600">🇺🇸 美股 (${usStocks.length} 只)</span>
+        <button onclick="addStockToEditSector('us')" class="modal-btn" style="font-size:10px;padding:4px 8px">+ 添加</button>
+      </div>
+      <div id="es_us_stocks">
+        ${renderEditStockList(usStocks, 'us')}
+      </div>
+    </div>
+
+    <!-- 快速添加输入框 -->
+    <div id="es_quick_add" style="display:none;padding:10px;background:var(--bg-secondary);border-radius:var(--radius-sm);margin-bottom:10px">
+      <div style="font-size:12px;font-weight:600;margin-bottom:6px" id="es_quick_add_title">添加A股</div>
+      <div style="display:flex;gap:8px">
+        <input id="es_quick_code" class="modal-input" placeholder="${editingSectorIdx !== null ? '输入代码' : '如 300750'}" />
+        <input id="es_quick_name" class="modal-input" placeholder="名称(选填)" style="max-width:120px" />
+        <button id="es_quick_btn" class="modal-btn" onclick="confirmQuickAdd()">添加</button>
+        <button class="modal-btn" style="background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-secondary)" onclick="cancelQuickAdd()">取消</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderEditStockList(stocks, market) {
+  if (stocks.length === 0) {
+    return '<div style="font-size:11px;color:var(--text-muted);padding:6px 0">暂无股票</div>';
+  }
+  return stocks.map((s, i) => `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 10px;background:var(--bg-card);border-radius:4px;margin-bottom:3px;font-size:12px">
+      <span><span style="font-weight:600">${s.name || s.code}</span><span style="color:var(--text-muted);font-size:10px;margin-left:4px">${s.code}</span></span>
+      <button onclick="removeEditStock(${i},'${market}')" style="background:none;border:none;color:var(--accent-red);cursor:pointer;font-size:16px;padding:0 4px">×</button>
+    </div>
+  `).join('');
+}
+
+let quickAddMarket = null;
+
+function addStockToEditSector(market) {
+  quickAddMarket = market;
+  const el = document.getElementById('es_quick_add');
+  el.style.display = 'block';
+  document.getElementById('es_quick_add_title').textContent = market === 'cn' ? '添加A股' : '添加美股';
+  document.getElementById('es_quick_code').placeholder = market === 'cn' ? '如 300750' : '如 NVDA';
+  document.getElementById('es_quick_code').value = '';
+  document.getElementById('es_quick_name').value = '';
+  document.getElementById('es_quick_code').focus();
+}
+
+function cancelQuickAdd() {
+  document.getElementById('es_quick_add').style.display = 'none';
+  quickAddMarket = null;
+}
+
+function confirmQuickAdd() {
+  if (!quickAddMarket) return;
+  const code = document.getElementById('es_quick_code').value.trim().toUpperCase();
+  if (!code) { showToast('请输入股票代码'); return; }
+  const name = document.getElementById('es_quick_name').value.trim() || code;
+
+  const customs = loadCustomSectors();
+  const idx = editingSectorIdx;
+  if (idx === null || idx < 0) return;
+
+  if (!customs[idx].stocks[quickAddMarket]) customs[idx].stocks[quickAddMarket] = [];
+  const list = customs[idx].stocks[quickAddMarket];
+  if (list.some(s => s.code === code)) { showToast('该股票已存在'); return; }
+
+  list.push({ code, name, price: 0, change_pct: 0, market_cap: 0, pe: 0 });
+  saveCustomSectors(customs);
+  renderEditSectorBody(customs[idx]);
+
+  // 尝试获取实时数据
+  fetchAndSaveToCustomSector(customs[idx].key, quickAddMarket, code);
+}
+
+function removeEditStock(stockIdx, market) {
+  const customs = loadCustomSectors();
+  const idx = editingSectorIdx;
+  if (idx === null || idx < 0) return;
+  customs[idx].stocks[market].splice(stockIdx, 1);
+  saveCustomSectors(customs);
+  renderEditSectorBody(customs[idx]);
+}
+
+function saveNewSector() {
+  const name = document.getElementById('es_name').value.trim();
+  const icon = document.getElementById('es_icon').value.trim() || '📊';
+  const type = document.getElementById('es_type').value;
+  if (!name) { showToast('请输入板块名称'); return; }
+
+  const customs = loadCustomSectors();
+  // 检查重名
+  if (customs.some(s => s.key === name) || ICONS.hasOwnProperty(name)) {
+    showToast('该板块名称已存在'); return;
+  }
+
+  customs.push({ key: name, type, icon, stocks: { cn: [], us: [] } });
+  saveCustomSectors(customs);
+  closeEditSector();
+  rebuildFullDashboard();
+  // 切换到新板块
+  switchSector(name);
+  showToast('已创建板块 "' + name + '"');
+}
+
+function saveEditSector() {
+  const name = document.getElementById('es_name').value.trim();
+  const icon = document.getElementById('es_icon').value.trim() || '📊';
+  const type = document.getElementById('es_type').value;
+  if (!name) { showToast('请输入板块名称'); return; }
+
+  const customs = loadCustomSectors();
+  const idx = editingSectorIdx;
+  if (idx === null || idx < 0) return;
+
+  const oldName = customs[idx].key;
+  // 检查重名（排除自己）
+  if (customs.some((s, i) => i !== idx && s.key === name) || (ICONS.hasOwnProperty(name) && name !== oldName)) {
+    showToast('该板块名称已存在'); return;
+  }
+
+  customs[idx].key = name;
+  customs[idx].icon = icon;
+  customs[idx].type = type;
+  saveCustomSectors(customs);
+  closeEditSector();
+  rebuildFullDashboard();
+  showToast('板块已更新');
+}
+
+/** 获取自定义板块的实时数据并更新 */
+async function fetchAndSaveToCustomSector(sectorKey, market, code) {
+  const sym = market === 'cn' ? cnToTencent(code) : usToTencent(code);
+  try {
+    const r = await fetchTencentQuotes([sym]);
+    const q = r[sym];
+    if (q && q.price > 0) {
+      const customs = loadCustomSectors();
+      const sec = customs.find(s => s.key === sectorKey);
+      if (sec) {
+        const stocks = sec.stocks[market];
+        const s = stocks.find(x => x.code === code);
+        if (s) {
+          s.price = q.price;
+          s.change_pct = q.change_pct;
+          if (q.market_cap > 0) s.market_cap = q.market_cap;
+          if (q.pe > 0) s.pe = q.pe;
+          if (q.name) s.name = q.name;
+          saveCustomSectors(customs);
+          renderEditSectorBody(sec);
+          // 同步更新 data 缓存
+          if (!data[sectorKey]) data[sectorKey] = { name: sec.key, is_concept: sec.type === 'concept' };
+          if (!data[sectorKey][market === 'cn' ? 'a_share' : 'us']) {
+            data[sectorKey][market === 'cn' ? 'a_share' : 'us'] = { stocks: [], count: 0 };
+          }
+          // 不需要重建面板（弹窗打开时）
+        }
+      }
+    }
+  } catch(e) {
+    console.warn('fetchAndSaveToCustomSector error:', e);
+  }
+}
+
+/* ===== 重建整个看板（侧栏+面板）===== */
+function rebuildFullDashboard() {
+  const sidebar = document.getElementById('sidebar');
+  const panels = document.getElementById('sectorPanels');
+  const allKeys = getAllOrderedKeys();
+
+  let navHtml = '<div class="concept-divider" style="border-top:none;margin-top:0">概念板块</div>';
+  let panelHtml = '';
+  let industryStarted = false;
+
+  allKeys.forEach((k, i) => {
+    const d = data[k];
+    const isConc = isConceptEx(k);
+    const isCust = isCustomSector(k);
+    if (!isConc && !industryStarted) {
+      industryStarted = true;
+      navHtml += '<div class="sidebar-header">行业板块</div>';
+    }
+    const total = getActualStocksEx(k, 'cn').length + getActualStocksEx(k, 'us').length;
+    const customTag = isCust ? '<span class="custom-sector-tag">自定义</span>' : '';
+    const delBtn = isCust ? `<button class="sector-del-btn" onclick="event.stopPropagation();quickDeleteCustom('${k.replace(/'/g, "\'")}')" title="删除板块">×</button>` : '';
+    const editBtn = isCust ? `<button class="sector-edit-btn" onclick="event.stopPropagation();openEditSectorByName('${k.replace(/'/g, "\'")}')" title="编辑板块">✏️</button>` : '';
+    navHtml += `<div class="sector-nav-item${isConc ? ' concept' : ''}" data-sector="${k}" draggable="true" onclick="switchSector('${k}')">
+      <span class="sector-icon">${getSectorIcon(k)}</span><span class="sector-label">${k}${customTag}</span><span class="sector-count">${total}</span>${editBtn}${delBtn}
+    </div>`;
+    panelHtml += buildPanelEx(k);
+  });
+  navHtml += '<div class="sidebar-add-btn" onclick="openSectorManager()">➕ 新建板块</div>';
+  navHtml += '<div class="sidebar-drag-hint">拖拽可调整板块顺序</div>';
+  sidebar.innerHTML = navHtml;
+  panels.innerHTML = panelHtml;
+
+  initSectorDragDrop(sidebar);
+
+  let totalStocks = 0;
+  allKeys.forEach(k => { totalStocks += getActualStocksEx(k, 'cn').length + getActualStocksEx(k, 'us').length; });
+  document.getElementById('totalStocks').textContent = totalStocks;
+  document.getElementById('totalSectors').textContent = allKeys.length;
+}
+
+function quickDeleteCustom(key) {
+  if (!confirm('确定删除板块 "' + key + '" 吗？')) return;
+  const customs = loadCustomSectors();
+  const idx = customs.findIndex(s => s.key === key);
+  if (idx < 0) return;
+  customs.splice(idx, 1);
+  saveCustomSectors(customs);
+  const allKeys = getAllOrderedKeys();
+  rebuildFullDashboard();
+  if (cur === key && allKeys.length > 0) switchSector(allKeys[0]);
+  showToast('已删除板块 "' + key + '"');
+}
+
+function openEditSectorByName(key) {
+  const customs = loadCustomSectors();
+  const idx = customs.findIndex(s => s.key === key);
+  if (idx < 0) return;
+  openEditSector(idx);
+}
+
+function getSectorIcon(key) {
+  if (ICONS[key]) return ICONS[key];
+  const cs = getCustomSectorDef(key);
+  return cs ? (cs.icon || '📊') : '📊';
+}
+
+/** 兼容自定义板块的 getActualStocks */
+function getActualStocksEx(sectorKey, market) {
+  // 先检查自定义板块
+  const cs = getCustomSectorDef(sectorKey);
+  if (cs) {
+    const hidden = loadHidden();
+    const hKey = sectorKey + '_' + market;
+    const stocks = cs.stocks[market] || [];
+    const hiddenCodes = new Set(hidden[hKey] || []);
+    return stocks.filter(s => !hiddenCodes.has(s.code));
+  }
+  // 原有板块
+  return getActualStocks(sectorKey, market);
+}
+
+/** 兼容自定义板块的 buildPanel */
+function buildPanelEx(key) {
+  const cs = getCustomSectorDef(key);
+  if (cs) {
+    const isConc = cs.type === 'concept';
+    return `<div class="sector-content" data-sector="${key}">
+      <div class="sector-title-bar">
+        <span class="sector-title">${key}${isConc ? '<span class="concept-tag">概念板块</span>' : '<span class="custom-sector-tag">自定义</span>'}</span>
+      </div>
+      <div class="comparison-grid">
+        ${buildMarketPanelEx(key, 'cn', cs.stocks.cn || [], '🇨🇳', 'A股', key)}
+        ${buildMarketPanelEx(key, 'us', cs.stocks.us || [], '🇺🇸', '美股', key)}
+      </div>
+    </div>`;
+  }
+  // 原有板块
+  return buildPanel(key);
+}
+
+/** 兼容自定义板块的 buildMarketPanel */
+function buildMarketPanelEx(sectorKey, market, stocks, flag, label, title) {
+  const isEM = (editMode && editMode.sectorKey === sectorKey && editMode.market === market);
+  const hidden = loadHidden();
+  const extra = loadExtra();
+  const hKey = sectorKey + '_' + market;
+
+  // 对于自定义板块，stocks 已经是完整列表，extra 是补充
+  let allStocks = [...stocks];
+  const extraStocks = extra[hKey] || [];
+  if (extraStocks.length > 0) {
+    const existCodes = new Set(allStocks.map(s => s.code));
+    extraStocks.forEach(s => { if (!existCodes.has(s.code)) allStocks.push(s); });
+  }
+  allStocks.sort((a, b) => (b.change_pct || 0) - (a.change_pct || 0));
+
+  const hiddenCodes = new Set(hidden[hKey] || []);
+  allStocks = allStocks.filter(s => !hiddenCodes.has(s.code));
+  const up = allStocks.filter(s => s.change_pct > 0).length;
+  const down = allStocks.filter(s => s.change_pct < 0).length;
+  const rows = allStocks.length
+    ? allStocks.map((s, i) => stockRow(s, i, sectorKey, market, isEM)).join('')
+    : `<tr><td colspan="6"><div class="empty-state"><div class="empty-state-icon">📊</div>暂无数据</div></td></tr>`;
+
+  return `<div class="market-panel${isEM ? ' edit-mode' : ''}" id="panel_${sectorKey}_${market}">
+    <div class="panel-header">
+      <span class="panel-title"><span class="panel-flag">${flag}</span>${label} · ${title}</span>
+      <div class="panel-actions">
+        <span class="panel-stats">共 ${allStocks.length} 只 | <span class="up">涨 ${up}</span> <span class="down">跌 ${down}</span></span>
+        <button class="edit-btn${isEM ? ' active' : ''}" onclick="toggleEditMode('${sectorKey}','${market}')">${isEM ? '✅ 完成' : '✏️ 编辑'}</button>
+        ${isEM ? `<button class="modal-btn" style="font-size:11px;padding:5px 10px" onclick="openAddModal('${sectorKey}','${market}')">+ 添加</button>` : ''}
+      </div>
+    </div>
+    <div class="stock-table-wrap">
+      <table class="stock-table">
+        <thead><tr><th>#</th><th>股票</th><th>股价</th><th>涨跌</th><th>市值</th><th>PE</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+/* ===== 兼容自定义板块的 switchSector 和刷新 ===== */
+// switchSector 不需要改（它调 rebuildPanel 和 updateSummary，我们只需要确保这两个函数兼容）
+
+// 修改 refreshSectorSilent 兼容自定义板块
+// 原 refreshSectorSilent 使用 data[sectorKey]，自定义板块不在 data 中
+// 我们需要在 refreshSectorSilent 开头检查是否为自定义板块
+
+// 修改 autoFixChangePct 兼容自定义板块
+
+// 修改 updateSummary 兼容自定义板块
+
+// 修改 getOrderedKeys 返回所有板块
 
 loadData();
 
@@ -1246,6 +1837,32 @@ async function refreshRealtime() {
   if (!btn || btn.disabled) return;
 
   const sectorKey = cur;
+  // 自定义板块
+  if(isCustomSector(sectorKey)){
+    const cs=getCustomSectorDef(sectorKey);
+    if(!cs){showToast('无板块数据');return;}
+    btn.disabled=true;btn.textContent='⏳ 刷新中...';btn.className='refresh-btn';
+    try{
+      const cnSs=(cs.stocks.cn||[]).map(s=>cnToTencent(s.code));
+      const usSs=(cs.stocks.us||[]).map(s=>usToTencent(s.code));
+      const[cnR,usR]=await Promise.all([
+        cnSs.length>0?fetchTencentQuotes(cnSs):Promise.resolve({}),
+        usSs.length>0?fetchTencentQuotes(usSs):Promise.resolve({})
+      ]);
+      let updated=0;
+      (cs.stocks.cn||[]).forEach(s=>{const sym=cnToTencent(s.code);const r=cnR[sym];if(r&&r.price>0){s.price=r.price;s.change_pct=r.change_pct;if(r.name)s.name=r.name;if(r.market_cap>0)s.market_cap=r.market_cap;if(r.pe>0)s.pe=r.pe;updated++;}});
+      (cs.stocks.us||[]).forEach(s=>{const sym=usToTencent(s.code);const r=usR[sym];if(r&&r.price>0){s.price=r.price;s.change_pct=r.change_pct;if(r.name)s.name=r.name;if(r.market_cap>0)s.market_cap=r.market_cap;if(r.pe>0)s.pe=r.pe;updated++;}});
+      saveCustomSectors(loadCustomSectors());
+      rebuildPanel(sectorKey);
+      if(updated>0){btn.className='refresh-btn success';btn.textContent='✅ 已刷新 '+updated+' 只';updateTimestamp();showToast('行情已刷新：'+updated+' 只');}
+      else{btn.className='refresh-btn error';btn.textContent='⚠️ 无数据';showToast('未获取到新数据');}
+      setTimeout(()=>{btn.disabled=false;btn.textContent='🔄 刷新行情';btn.className='refresh-btn';},3000);
+    }catch(e){
+      console.error('Custom refresh error:',e);btn.className='refresh-btn error';btn.textContent='❌ 刷新失败';
+      showToast('刷新失败: '+(e.message||'网络错误'));setTimeout(()=>{btn.disabled=false;btn.textContent='🔄 刷新行情';btn.className='refresh-btn';},3000);
+    }
+    return;
+  }
   const sectorData = data[sectorKey];
   if (!sectorData) { showToast('无板块数据'); return; }
 
@@ -1383,12 +2000,28 @@ async function refreshRealtime() {
  * 批量获取所有股票，一次性请求修正
  */
 async function autoFixChangePct(){
+  // 将自定义板块注册到 data 中（用于面板构建）
+  const customs=loadCustomSectors();
+  customs.forEach(cs=>{
+    if(!data[cs.key]){
+      data[cs.key]={name:cs.key,is_concept:cs.type==='concept',a_share:{stocks:[],count:0},us:{stocks:[],count:0}};
+    }
+  });
   const allKeys=getOrderedKeys();
 
   // 1. 一次性收集所有板块的所有代码
   const allCnSyms = new Set();
   const allUsSyms = new Set();
   for(const key of allKeys){
+    // 自定义板块
+    if(isCustomSector(key)){
+      const cs=getCustomSectorDef(key);
+      if(cs){
+        (cs.stocks.cn||[]).forEach(s=>allCnSyms.add(cnToTencent(s.code)));
+        (cs.stocks.us||[]).forEach(s=>allUsSyms.add(usToTencent(s.code)));
+      }
+      continue;
+    }
     const sectorData = data[key];
     if(!sectorData) continue;
     (sectorData.a_share?.stocks||[]).forEach(s => allCnSyms.add(cnToTencent(s.code)));
@@ -1423,6 +2056,18 @@ async function autoFixChangePct(){
     // 3. 逐板块修正
     let totalFixed = 0;
     for(const key of allKeys){
+      // 自定义板块修正
+      if(isCustomSector(key)){
+        const customs=loadCustomSectors();
+        const sec=customs.find(s=>s.key===key);
+        if(sec){
+          let changed=false;
+          (sec.stocks.cn||[]).forEach(s=>{const sym=cnToTencent(s.code);const r=allCn[sym];if(r&&r.price>0){if(s.change_pct!==r.change_pct)totalFixed++;s.price=r.price;s.change_pct=r.change_pct;if(r.name)s.name=r.name;if(r.market_cap>0)s.market_cap=r.market_cap;if(r.pe>0)s.pe=r.pe;changed=true;}});
+          (sec.stocks.us||[]).forEach(s=>{const sym=usToTencent(s.code);const r=allUs[sym];if(r&&r.price>0){if(s.change_pct!==r.change_pct)totalFixed++;s.price=r.price;s.change_pct=r.change_pct;if(r.name)s.name=r.name;if(r.market_cap>0)s.market_cap=r.market_cap;if(r.pe>0)s.pe=r.pe;changed=true;}});
+          if(changed) saveCustomSectors(customs);
+        }
+        continue;
+      }
       const sectorData = data[key];
       if(!sectorData) continue;
       (sectorData.a_share?.stocks||[]).forEach(s => {
