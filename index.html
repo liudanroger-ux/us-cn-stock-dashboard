@@ -854,7 +854,7 @@ async function fetchAndSaveStock(sectorKey, market, code, name){
         s.change_pct=q.change_pct;
         if(q.market_cap>0) s.market_cap=q.market_cap;
         if(q.pe>0) s.pe=q.pe;
-        if(q.name && (!name||name===code)) s.name=q.name;
+        if(q.name) s.name=q.name;  // 总是用 API 返回的正确名称覆盖
         saveExtra(extra);
         rebuildPanel(sectorKey);
         showToast(`${q.name} 已添加并获取数据`);
@@ -923,8 +923,8 @@ async function refreshSectorSilent(sectorKey){
       cnSyms.length>0?fetchTencentQuotes(cnSyms):Promise.resolve({}),
       usSyms.length>0?fetchTencentQuotes(usSyms):Promise.resolve({})
     ]);
-    cnStocks.forEach(s=>{const sym=cnToTencent(s.code);const r=cnResult[sym];if(r&&r.price>0){s.price=r.price;s.change_pct=r.change_pct;if(r.market_cap>0)s.market_cap=r.market_cap;if(r.pe>0)s.pe=r.pe;}});
-    usStocks.forEach(s=>{const sym=usToTencent(s.code);const r=usResult[sym];if(r&&r.price>0){s.price=r.price;s.change_pct=r.change_pct;if(r.market_cap>0)s.market_cap=r.market_cap;if(r.pe>0)s.pe=r.pe;}});
+    cnStocks.forEach(s=>{const sym=cnToTencent(s.code);const r=cnResult[sym];if(r&&r.price>0){s.price=r.price;s.change_pct=r.change_pct;if(r.name)s.name=r.name;if(r.market_cap>0)s.market_cap=r.market_cap;if(r.pe>0)s.pe=r.pe;}});
+    usStocks.forEach(s=>{const sym=usToTencent(s.code);const r=usResult[sym];if(r&&r.price>0){s.price=r.price;s.change_pct=r.change_pct;if(r.name)s.name=r.name;if(r.market_cap>0)s.market_cap=r.market_cap;if(r.pe>0)s.pe=r.pe;}});
     const cnEx=extra[`${sectorKey}_cn`]||[];
     const usEx=extra[`${sectorKey}_us`]||[];
     cnEx.forEach(s=>{const sym=cnToTencent(s.code);const r=cnResult[sym];if(r&&r.price>0){s.price=r.price;s.change_pct=r.change_pct;if(r.name)s.name=r.name;if(r.market_cap>0)s.market_cap=r.market_cap;if(r.pe>0)s.pe=r.pe;}});
@@ -1179,7 +1179,7 @@ function fetchTencentQuotes(symbols) {
               const data = raw.replace(/^"|"$/g, '');
               const parts = data.split('~');
               // A股状态码=1, 美股状态码=200 或 51 等
-              if ((parts[0] === '1' || parseInt(parts[0]) > 100) && parts.length > 32) {
+              if ((parts[0] === '1' || parts[0] === '51' || parseInt(parts[0]) > 100) && parts.length > 32) {
                 const isUS = sym.startsWith('us');
                 const price = parseFloat(parts[3]) || 0;
                 const changePct = parseFloat(parts[32]) || 0;
