@@ -627,7 +627,6 @@ function manualSync(){
         panelHtml+=buildPanel(k);
       });
       navHtml+='<div class="sidebar-add-btn" onclick="openSectorManager()">➕ 新建板块</div>';
-  navHtml+='<div class="sidebar-add-btn" onclick="openSectorManager()">➕ 新建板块</div>';
   navHtml+='<div class="sidebar-drag-hint">拖拽可调整板块顺序</div>';
       sidebar.innerHTML=navHtml;
       panels.innerHTML=panelHtml;
@@ -1073,6 +1072,7 @@ function initDash(){
       <span class="sector-icon">${secIcon}</span><span class="sector-label">${k}${custTag}</span><span class="sector-count">${total}</span></div>`;
     panelHtml+=buildPanel(k);
   });
+  navHtml+='<div class="sidebar-add-btn" onclick="openSectorManager()">➕ 新建板块</div>';
   navHtml+='<div class="sidebar-drag-hint">拖拽可调整板块顺序</div>';
   sidebar.innerHTML=navHtml;
   panels.innerHTML=panelHtml;
