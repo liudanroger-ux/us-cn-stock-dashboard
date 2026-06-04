@@ -679,11 +679,9 @@ function buildMarketPanel(sectorKey, market, sdata, flag, label, title){
   // 按涨跌幅降序排序（含手动添加的股票）
   allStocks.sort((a,b)=>(b.change_pct||0)-(a.change_pct||0));
 
-  // 过滤隐藏
-  if(!isEM){
-    const hiddenCodes=new Set(hidden[hKey]||[]);
-    allStocks=allStocks.filter(s=>!hiddenCodes.has(s.code));
-  }
+  // 过滤隐藏（编辑模式下也过滤：点叉即删，无需展示已隐藏状态）
+  const hiddenCodes=new Set(hidden[hKey]||[]);
+  allStocks=allStocks.filter(s=>!hiddenCodes.has(s.code));
   const up=allStocks.filter(s=>s.change_pct>0).length;
   const down=allStocks.filter(s=>s.change_pct<0).length;
   const rows=allStocks.length
