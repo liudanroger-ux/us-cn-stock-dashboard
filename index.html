@@ -1,8 +1,11 @@
-﻿<!DOCTYPE html>
+﻿<!-- Dashboard v18.2 - 修复自定义板块美股刷新 + 防御性检查 + 迁移逻辑 -->
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta http-equiv="cache-control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="expires" content="0">
 <title>中美行业龙头对比看板</title>
 <style>
 :root {
@@ -1034,21 +1037,53 @@ async function refreshSectorSilent(sectorKey){
   // 自定义板块：从 customSectors 获取数据
   if(isCustomSector(sectorKey)){
     const cs=getCustomSectorDef(sectorKey);
-    if(!cs) return;
+    if(!cs) { console.warn('[Refresh] sector def not found:', sectorKey); return; }
+    // 防御：确保 stocks 字段存在
+    if(!cs.stocks) { cs.stocks = { cn:[], us:[] }; console.log('[Refresh] Auto-init stocks for:', sectorKey); }
+    if(!cs.stocks.cn) cs.stocks.cn = [];
+    if(!cs.stocks.us) cs.stocks.us = [];
     try{
-      const cnSs=(cs.stocks.cn||[]).map(s=>cnToTencent(s.code));
-      const usSs=(cs.stocks.us||[]).map(s=>usToTencent(s.code));
-      if(cnSs.length===0&&usSs.length===0) return;
+      const cnSyms=(cs.stocks.cn||[]).map(s=>cnToTencent(s.code));
+      const usSyms=(cs.stocks.us||[]).map(s=>usToTencent(s.code));
+      console.log('[Refresh]', sectorKey, 'cnSyms:', cnSyms, 'usSyms:', usSyms);
+      if(cnSyms.length===0&&usSyms.length===0) { console.log('[Refresh] No stocks to refresh for:', sectorKey); return; }
       const[cnR,usR]=await Promise.all([
-        cnSs.length>0?fetchTencentQuotes(cnSs):Promise.resolve({}),
-        usSs.length>0?fetchTencentQuotes(usSs):Promise.resolve({})
+        cnSyms.length>0?fetchTencentQuotes(cnSyms):Promise.resolve({}),
+        usSyms.length>0?fetchTencentQuotes(usSyms):Promise.resolve({})
       ]);
+      console.log('[Refresh] Fetched cnR keys:', Object.keys(cnR), 'usR keys:', Object.keys(usR));
       const customs=loadCustomSectors();
       const sec=customs.find(s=>s.key===sectorKey);
-      if(!sec) return;
-      (sec.stocks.cn||[]).forEach(s=>{const sym=cnToTencent(s.code);const r=cnR[sym];if(r&&r.price>0){s.price=r.price;s.change_pct=r.change_pct;if(r.name)s.name=r.name;if(r.market_cap>0)s.market_cap=r.market_cap;if(r.pe>0)s.pe=r.pe;}});
-      (sec.stocks.us||[]).forEach(s=>{const sym=usToTencent(s.code);const r=usR[sym];if(r&&r.price>0){s.price=r.price;s.change_pct=r.change_pct;if(r.name)s.name=r.name;if(r.market_cap>0)s.market_cap=r.market_cap;if(r.pe>0)s.pe=r.pe;}});
+      if(!sec) { console.warn('[Refresh] sector not found after reload:', sectorKey); return; }
+      // 防御：确保 sec.stocks 存在
+      if(!sec.stocks) sec.stocks = { cn:[], us:[] };
+      if(!sec.stocks.cn) sec.stocks.cn = [];
+      if(!sec.stocks.us) sec.stocks.us = [];
+      // 更新 A 股
+      (sec.stocks.cn||[]).forEach(s=>{
+        const sym=cnToTencent(s.code);
+        const r=cnR[sym];
+        if(r&&r.price>0){
+          s.price=r.price;s.change_pct=r.change_pct;
+          if(r.name)s.name=r.name;
+          if(r.market_cap>0)s.market_cap=r.market_cap;
+          if(r.pe>0)s.pe=r.pe;
+        }
+      });
+      // 更新美股
+      (sec.stocks.us||[]).forEach(s=>{
+        const sym=usToTencent(s.code);
+        const r=usR[sym];
+        console.log('[Refresh] US stock:', s.code, 'sym:', sym, 'result:', r);
+        if(r&&r.price>0){
+          s.price=r.price;s.change_pct=r.change_pct;
+          if(r.name)s.name=r.name;
+          if(r.market_cap>0)s.market_cap=r.market_cap;
+          if(r.pe>0)s.pe=r.pe;
+        }
+      });
       saveCustomSectors(customs);
+      console.log('[Refresh] Saved', sectorKey, 'us stocks:', sec.stocks.us);
       rebuildPanel(sectorKey);
       updateTimestamp();
     }catch(e){console.warn('Custom refresh error:',e);}
@@ -1318,8 +1353,17 @@ function genDemo(){
 const LS_CUSTOM_SECTORS = 'dashboard_custom_sectors_v1';
 
 function loadCustomSectors() {
-  try { return JSON.parse(localStorage.getItem(LS_CUSTOM_SECTORS) || '[]'); }
-  catch(e) { return []; }
+  try {
+    const raw = localStorage.getItem(LS_CUSTOM_SECTORS);
+    const customs = raw ? JSON.parse(raw) : [];
+    // 迁移：确保老版本板块都有 stocks 字段
+    let changed = false;
+    customs.forEach(cs => {
+      if (!cs.stocks) { cs.stocks = { cn: [], us: [] }; changed = true; }
+    });
+    if (changed) saveCustomSectors(customs);
+    return customs;
+  } catch(e) { return []; }
 }
 function saveCustomSectors(arr) {
   localStorage.setItem(LS_CUSTOM_SECTORS, JSON.stringify(arr));
@@ -1762,6 +1806,8 @@ function getActualStocksEx(sectorKey, market) {
 function buildPanelEx(key) {
   const cs = getCustomSectorDef(key);
   if (cs) {
+    // 防御：确保 stocks 字段存在
+    if (!cs.stocks) cs.stocks = { cn: [], us: [] };
     const isConc = cs.type === 'concept';
     return `<div class="sector-content" data-sector="${key}">
       <div class="sector-title-bar">
