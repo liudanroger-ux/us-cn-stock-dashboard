@@ -806,8 +806,9 @@ function updateSidebarCount(key){
   if(!navEl) return;
   const cntEl=navEl.querySelector('.sector-count');
   if(!cntEl) return;
-  const cn=getActualStocks(key,'cn').length;
-  const us=getActualStocks(key,'us').length;
+  // 统一使用 getActualStocksEx，自定义板块和普通板块都正确
+  const cn=getActualStocksEx(key,'cn').length;
+  const us=getActualStocksEx(key,'us').length;
   cntEl.textContent=cn+us;
 }
 
@@ -834,10 +835,10 @@ function rebuildPanel(key){
   // 更新侧栏板块计数和头部总数
   updateSidebarCount(key);
   updateTotalStocks();
-  // 更新摘要栏 A股/美股数量
+  // 更新摘要栏 A股/美股数量（统一使用 getActualStocksEx）
   if(cur===key){
-    document.getElementById('summaryCnt_CN').textContent=getActualStocks(key,'cn').length+' 只';
-    document.getElementById('summaryCnt_US').textContent=getActualStocks(key,'us').length+' 只';
+    document.getElementById('summaryCnt_CN').textContent=getActualStocksEx(key,'cn').length+' 只';
+    document.getElementById('summaryCnt_US').textContent=getActualStocksEx(key,'us').length+' 只';
   }
 }
 
@@ -858,10 +859,38 @@ function closeModal(){
 function renderModalList(){
   if(!modalTarget) return;
   const {sectorKey,market}=modalTarget;
+  const el=document.getElementById('modalAddedList');
+  if(!el) return;
+
+  // 自定义板块：显示 cs.stocks[market]（合并 extra）
+  if(isCustomSector(sectorKey)){
+    const cs = getCustomSectorDef(sectorKey);
+    if(!cs) { el.innerHTML=''; return; }
+    let stocks = [...(cs.stocks[market] || [])];
+    // 合并 extra
+    const extra = loadExtra();
+    const hKey = sectorKey + '_' + market;
+    const extraStocks = extra[hKey] || [];
+    const existCodes = new Set(stocks.map(s => s.code));
+    extraStocks.forEach(s => { if (!existCodes.has(s.code)) stocks.push(s); });
+    if(stocks.length===0){
+      el.innerHTML='<div style="font-size:11px;color:var(--text-muted);padding:6px 0">暂无股票，请在侧栏点击✏️编辑添加</div>';
+      return;
+    }
+    el.innerHTML=stocks.map((s,i)=>{
+      const codeEsc = (s.code||'').replace(/'/g,"\\'");
+      return `<div class="modal-added-item">
+        <span><span class="modal-added-name">${s.name||s.code}</span><span class="modal-added-code">${s.code}</span></span>
+        <button class="modal-remove-btn" title="移除" onclick="removeStockFromCustom('${sectorKey.replace(/'/g,"\\'")}','${market}','${codeEsc}')">×</button>
+      </div>`;
+    }).join('');
+    return;
+  }
+
+  // 原有板块：显示 extra[key]（现有行为）
   const extra=loadExtra();
   const key=`${sectorKey}_${market}`;
   const list=extra[key]||[];
-  const el=document.getElementById('modalAddedList');
   if(list.length===0){ el.innerHTML='<div style="font-size:11px;color:var(--text-muted);padding:6px 0">暂无自定义添加的股票</div>'; return; }
   el.innerHTML=list.map((s,i)=>`<div class="modal-added-item">
     <span><span class="modal-added-name">${s.name||s.code}</span><span class="modal-added-code">${s.code}</span></span>
@@ -874,6 +903,27 @@ function addStockFromModal(){
   if(!code){ alert('请输入股票代码'); return; }
   const name=document.getElementById('inputName').value.trim()||code;
   const {sectorKey,market}=modalTarget;
+
+  // 自定义板块：写入 cs.stocks[market]
+  if(isCustomSector(sectorKey)){
+    const customs = loadCustomSectors();
+    const idx = customs.findIndex(s => s.key === sectorKey);
+    if(idx<0){ alert('板块未找到'); return; }
+    if(!customs[idx].stocks) customs[idx].stocks = {cn:[], us:[]};
+    if(!customs[idx].stocks[market]) customs[idx].stocks[market] = [];
+    if(customs[idx].stocks[market].some(s=>s.code===code)){ alert('该股票已存在'); return; }
+    const newStock={code,name,price:0,change_pct:0,market_cap:0,pe:0};
+    customs[idx].stocks[market].push(newStock);
+    saveCustomSectors(customs);
+    document.getElementById('inputCode').value='';
+    document.getElementById('inputName').value='';
+    renderModalList();
+    rebuildPanel(sectorKey);
+    fetchAndSaveToCustomSector(sectorKey, market, code);
+    return;
+  }
+
+  // 原有板块：写入 extra（现有行为）
   const extra=loadExtra();
   const key=`${sectorKey}_${market}`;
   if(!extra[key]) extra[key]=[];
@@ -939,6 +989,28 @@ function removeExtraStock(idx){
   if(extra[key]) extra[key].splice(idx,1);
   saveExtra(extra);
   renderModalList();
+}
+
+/** 从自定义板块中移除一只股票（供添加股票弹窗的移除按钮调用） */
+function removeStockFromCustom(sectorKey, market, code){
+  const customs = loadCustomSectors();
+  const idx = customs.findIndex(s => s.key === sectorKey);
+  if(idx < 0) return;
+  if(!customs[idx].stocks) customs[idx].stocks = {cn:[], us:[]};
+  const list = customs[idx].stocks[market];
+  if(!list) return;
+  const sidx = list.findIndex(s => s.code === code);
+  if(sidx >= 0) list.splice(sidx, 1);
+  saveCustomSectors(customs);
+  // 刷新添加股票弹窗中的列表（如果当前弹窗目标是同一个板块）
+  if(modalTarget && modalTarget.sectorKey === sectorKey && modalTarget.market === market){
+    renderModalList();
+  }
+  // 刷新面板和计数
+  rebuildPanel(sectorKey);
+  updateSidebarCount(sectorKey);
+  updateTotalStocks();
+  if(cur === sectorKey) updateSummary(sectorKey);
 }
 
 /* ===== 切换板块（同时刷新行情） ===== */
@@ -1015,8 +1087,9 @@ async function refreshSectorSilent(sectorKey){
 }
 
 function updateSummary(key){
-  const cnStocks=getActualStocks(key,'cn');
-  const usStocks=getActualStocks(key,'us');
+  // 统一使用 getActualStocksEx，自定义板块和普通板块都正确
+  const cnStocks=getActualStocksEx(key,'cn');
+  const usStocks=getActualStocksEx(key,'us');
   if(cnStocks.length===0 && usStocks.length===0) return;
   const cnMC=cnStocks.reduce((s,x)=>s+(x.market_cap||0),0);
   const usMC=usStocks.reduce((s,x)=>s+(x.market_cap||0),0);
@@ -1082,6 +1155,8 @@ function initDash(){
   document.getElementById('totalStocks').textContent=totalStocks;
   document.getElementById('totalSectors').textContent=allKeys.length;
   document.getElementById('loadingOverlay').style.display='none';
+  // 初始化云端同步状态图标（不再自动 loadCloudPrefs，手动触发）
+  updateSyncUI();
 }
 
 /* ===== 侧栏拖拽排序 ===== */
@@ -1154,8 +1229,9 @@ function rebuildAllPanels(){
     const el=document.querySelector('.sector-content[data-sector="'+activeKey+'"]');
     if(el) el.classList.add('active');
     updateSummary(activeKey);
-    document.getElementById('summaryCnt_CN').textContent=getActualStocks(activeKey,'cn').length+' 只';
-    document.getElementById('summaryCnt_US').textContent=getActualStocks(activeKey,'us').length+' 只';
+    // 统一使用 getActualStocksEx
+    document.getElementById('summaryCnt_CN').textContent=getActualStocksEx(activeKey,'cn').length+' 只';
+    document.getElementById('summaryCnt_US').textContent=getActualStocksEx(activeKey,'us').length+' 只';
   }
   updateTotalStocks();
 }
@@ -1667,7 +1743,14 @@ function getActualStocksEx(sectorKey, market) {
   if (cs) {
     const hidden = loadHidden();
     const hKey = sectorKey + '_' + market;
-    const stocks = cs.stocks[market] || [];
+    // 合并 cs.stocks[market] + extra（与 buildMarketPanelEx 保持一致）
+    let stocks = [...(cs.stocks[market] || [])];
+    const extra = loadExtra();
+    const extraStocks = extra[hKey] || [];
+    if (extraStocks.length > 0) {
+      const existCodes = new Set(stocks.map(s => s.code));
+      extraStocks.forEach(s => { if (!existCodes.has(s.code)) stocks.push(s); });
+    }
     const hiddenCodes = new Set(hidden[hKey] || []);
     return stocks.filter(s => !hiddenCodes.has(s.code));
   }
