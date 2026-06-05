@@ -462,7 +462,8 @@ const ICONS={
   "电力":"⚡","电气设备":"🔌","黄金":"🥇","大卖场超市":"🏪",
   "食品饮料":"🍔","汽车":"🚗",  "工业机械":"🏭",  "消费电子":"📱",
   "机器人概念":"🦾","固态电池概念":"🧪",
-  "AI硬件":"🤖","AI软件":"🧠","创新药概念":"💊"
+  "AI硬件":"🤖","AI软件":"🧠","创新药概念":"💊",
+  "低空经济":"🚁","半导体材料":"🔬"
 };
 const SECT_FULL={
   "软件":"软件（系统软件，应用软件）","半导体产品":"半导体产品","半导体设备":"半导体设备",
@@ -476,9 +477,11 @@ const SECT_FULL={
   "机器人概念":"机器人（人形机器人、工业机器人、服务机器人等）",
   "固态电池概念":"固态电池（固态电解质、锂金属电池等）",
   "AI硬件":"AI硬件产品及制造","AI软件":"AI智能体与AI软件（AI Agent、AI办公、AI营销、AI金融等）",
-  "创新药概念":"创新药（抗癌药、单抗、CAR-T、减肥药/GLP-1等）"
+  "创新药概念":"创新药（抗癌药、单抗、CAR-T、减肥药/GLP-1等）",
+  "低空经济":"低空经济（飞行汽车、eVTOL、无人机、空管系统等）",
+  "半导体材料":"半导体材料（光刻胶、碳化硅、电子气体、靶材、硅片等）"
 };
-const CONCEPT_KEYS=["机器人概念","固态电池概念","AI硬件","AI软件","创新药概念"];
+const CONCEPT_KEYS=["机器人概念","固态电池概念","AI硬件","AI软件","创新药概念","低空经济","半导体材料"];
 const INDUSTRY_KEYS=Object.keys(ICONS).filter(k=>!CONCEPT_KEYS.includes(k));
 
 let data={}, cur=null;
@@ -602,37 +605,9 @@ function clearCloudConfig(){
 function manualSync(){
   showToast('正在从云端同步...');
   loadCloudPrefs().then(()=>{
-    // 重新初始化看板以应用云端偏好
-    // 将自定义板块注册到 data 中（用于面板构建）
-  const customs=loadCustomSectors();
-  customs.forEach(cs=>{
-    if(!data[cs.key]){
-      data[cs.key]={name:cs.key,is_concept:cs.type==='concept',a_share:{stocks:[],count:0},us:{stocks:[],count:0}};
-    }
-  });
-  const allKeys=getOrderedKeys();
-    if(allKeys.length>0){
-      // 重建侧栏和面板
-      const sidebar=document.getElementById('sidebar');
-      const panels=document.getElementById('sectorPanels');
-      let navHtml='<div class="concept-divider" style="border-top:none;margin-top:0">概念板块</div>';
-      let panelHtml='';
-      let industryStarted=false;
-      allKeys.forEach((k,i)=>{
-        const d=data[k];
-        const isConc=isConcept(k);
-        if(!isConc&&!industryStarted){ industryStarted=true; navHtml+='<div class="sidebar-header">行业板块</div>'; }
-        const total=getActualStocks(k,'cn').length+getActualStocks(k,'us').length;
-        navHtml+=`<div class="sector-nav-item${isConc?' concept':''}" data-sector="${k}" draggable="true" onclick="switchSector('${k}')"><span class="sector-icon">${ICONS[k]||'📊'}</span><span class="sector-label">${k}</span><span class="sector-count">${total}</span></div>`;
-        panelHtml+=buildPanel(k);
-      });
-      navHtml+='<div class="sidebar-add-btn" onclick="openSectorManager()">➕ 新建板块</div>';
-  navHtml+='<div class="sidebar-drag-hint">拖拽可调整板块顺序</div>';
-      sidebar.innerHTML=navHtml;
-      panels.innerHTML=panelHtml;
-      initSectorDragDrop(sidebar);
-      switchSector(allKeys[0]);
-    }
+    rebuildFullDashboard();
+    const allKeys=getAllOrderedKeys();
+    if(allKeys.length>0) switchSector(allKeys[0]);
     showToast('云端同步完成！');
   });
 }
@@ -1367,8 +1342,19 @@ function openEditSector(idx) {
 }
 
 function closeEditSector() {
+  const wasEditing = editingSectorIdx !== null;
   document.getElementById('editSectorModal').classList.remove('open');
   editingSectorIdx = null;
+  // 如果之前在编辑状态，关闭弹窗后刷新面板和计数
+  if (wasEditing) {
+    const customs = loadCustomSectors();
+    // 获取当前编辑的板块名（从 customs 里通过最后一个被编辑的 idx 获取）
+    if (customs.length > 0 && cur) {
+      rebuildPanel(cur);
+      updateSidebarCount(cur);
+      updateTotalStocks();
+    }
+  }
 }
 
 function renderEditSectorBody(sec) {
@@ -1527,7 +1513,7 @@ function saveEditSector() {
 
   const customs = loadCustomSectors();
   const idx = editingSectorIdx;
-  if (idx === null || idx < 0) return;
+  if (idx === null || idx < 0 || idx >= customs.length) { showToast('板块数据异常，请刷新页面'); return; }
 
   const oldName = customs[idx].key;
   // 检查重名（排除自己）
@@ -1535,9 +1521,12 @@ function saveEditSector() {
     showToast('该板块名称已存在'); return;
   }
 
+  // 显式保留原有股票数据，防止因任何原因丢失
+  const preservedStocks = customs[idx].stocks || { cn: [], us: [] };
   customs[idx].key = name;
   customs[idx].icon = icon;
   customs[idx].type = type;
+  customs[idx].stocks = preservedStocks;
   saveCustomSectors(customs);
   closeEditSector();
   rebuildFullDashboard();
