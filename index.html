@@ -497,14 +497,14 @@ const LS_EXTRA='dashboard_extra_v1';
 const LS_ORDER='dashboard_sector_order_v1';
 
 function loadHidden(){ try{ return JSON.parse(localStorage.getItem(LS_HIDDEN)||'{}'); }catch(e){ return {}; } }
-function saveHidden(h){ localStorage.setItem(LS_HIDDEN,JSON.stringify(h)); saveCloudPrefs(); }
+function saveHidden(h){ localStorage.setItem(LS_HIDDEN,JSON.stringify(h)); }
 function loadExtra(){ try{ return JSON.parse(localStorage.getItem(LS_EXTRA)||'{}'); }catch(e){ return {}; } }
-function saveExtra(e){ localStorage.setItem(LS_EXTRA,JSON.stringify(e)); saveCloudPrefs(); }
+function saveExtra(e){ localStorage.setItem(LS_EXTRA,JSON.stringify(e)); }
 function loadSectorOrder(){
   try{ const o=JSON.parse(localStorage.getItem(LS_ORDER)); if(Array.isArray(o)&&o.length>0) return o; }catch(e){}
   return null;
 }
-function saveSectorOrder(order){ localStorage.setItem(LS_ORDER,JSON.stringify(order)); saveCloudPrefs(); }
+function saveSectorOrder(order){ localStorage.setItem(LS_ORDER,JSON.stringify(order)); }
 /* ===== Cloud Sync (jsonbin.io) ===== */
 let CLOUD_URL=localStorage.getItem('dashboard_cloud_url')||'';
 let cloudApiKey=localStorage.getItem('dashboard_cloud_key')||'';
@@ -601,15 +601,32 @@ function clearCloudConfig(){
   closeSyncSettings();
   updateSyncUI();
 }
-/** 手动触发一次云端同步 */
-function manualSync(){
-  showToast('正在从云端同步...');
-  loadCloudPrefs().then(()=>{
+/** 手动触发一次云端同步（先保存本地到云端，再从云端读取） */
+async function manualSync(){
+  if(!CLOUD_URL||!cloudApiKey){ showToast('请先配置云端同步'); return; }
+  showToast('正在同步...');
+  try {
+    // 1. 先保存本地到云端
+    const payload={hidden:loadHidden(),extra:loadExtra(),order:loadSectorOrder()||[],custom_sectors:loadCustomSectors()};
+    const putResp=await fetch(CLOUD_URL,{
+      method:'PUT',
+      headers:{'Content-Type':'application/json','X-Master-Key':cloudApiKey},
+      body:JSON.stringify(payload)
+    });
+    if(!putResp.ok) throw new Error('PUT failed: '+putResp.status);
+
+    // 2. 再从云端读取（确保数据一致）
+    await loadCloudPrefs();
+    cloudSyncStatus='synced'; updateSyncUI();
     rebuildFullDashboard();
     const allKeys=getAllOrderedKeys();
     if(allKeys.length>0) switchSector(allKeys[0]);
     showToast('云端同步完成！');
-  });
+  }catch(e){
+    cloudSyncStatus='error'; updateSyncUI();
+    console.warn('[Sync] Manual sync failed:',e);
+    showToast('同步失败：'+e.message);
+  }
 }
 
 /** 获取显示顺序的板块 key 列表（尊重用户自定义排序） */
@@ -796,8 +813,8 @@ function updateSidebarCount(key){
 
 function updateTotalStocks(){
   let total=0;
-  getOrderedKeys().forEach(k=>{
-    total+=getActualStocks(k,'cn').length+getActualStocks(k,'us').length;
+  getAllOrderedKeys().forEach(k=>{
+    total+=getActualStocksEx(k,'cn').length+getActualStocksEx(k,'us').length;
   });
   document.getElementById('totalStocks').textContent=total;
 }
@@ -1021,7 +1038,7 @@ function initDash(){
       data[cs.key]={name:cs.key,is_concept:cs.type==='concept',a_share:{stocks:[],count:0},us:{stocks:[],count:0}};
     }
   });
-  const allKeys=getOrderedKeys();
+  const allKeys=getAllOrderedKeys();
 
   sBar.innerHTML=`
     <div class="summary-card"><div class="summary-icon" style="background:rgba(79,140,255,.15)">🇨🇳</div><div class="summary-info"><h3>A股总市值</h3><div class="value" id="summaryMC_CN">-</div></div></div>
@@ -1035,17 +1052,20 @@ function initDash(){
 
   allKeys.forEach((k,i)=>{
     const d=data[k];
-    const isConc=isConcept(k);
+    const isConc=isConceptEx(k);
+    const isCust=isCustomSector(k);
     if(!isConc && !industryStarted){
       industryStarted=true;
       navHtml+='<div class="sidebar-header">行业板块</div>';
     }
-    const total=getActualStocks(k,'cn').length+getActualStocks(k,'us').length;
-    const custTag=isCustomSector(k)?'<span class="custom-sector-tag">自定义</span>':'';
+    const total=getActualStocksEx(k,'cn').length+getActualStocksEx(k,'us').length;
+    const custTag=isCust?'<span class="custom-sector-tag">自定义</span>':'';
+    const delBtn=isCust?`<button class="sector-del-btn" onclick="event.stopPropagation();quickDeleteCustom('${k.replace(/'/g,"\\'")}')" title="删除板块">×</button>`:'';
+    const editBtn=isCust?`<button class="sector-edit-btn" onclick="event.stopPropagation();openEditSectorByName('${k.replace(/'/g,"\\'")}')" title="编辑板块">✏️</button>`:'';
     const secIcon=getSectorIcon(k);
     navHtml+=`<div class="sector-nav-item${isConc?' concept':''}${i===0?' active':''}" data-sector="${k}" draggable="true" onclick="switchSector('${k}')">
-      <span class="sector-icon">${secIcon}</span><span class="sector-label">${k}${custTag}</span><span class="sector-count">${total}</span></div>`;
-    panelHtml+=buildPanel(k);
+      <span class="sector-icon">${secIcon}</span><span class="sector-label">${k}${custTag}</span><span class="sector-count">${total}</span>${editBtn}${delBtn}</div>`;
+    panelHtml+=buildPanelEx(k);
   });
   navHtml+='<div class="sidebar-add-btn" onclick="openSectorManager()">➕ 新建板块</div>';
   navHtml+='<div class="sidebar-drag-hint">拖拽可调整板块顺序</div>';
@@ -1058,7 +1078,7 @@ function initDash(){
   if(allKeys.length>0) switchSector(allKeys[0]);
 
   let totalStocks=0;
-  allKeys.forEach(k=>{ totalStocks+=getActualStocks(k,'cn').length+getActualStocks(k,'us').length; });
+  allKeys.forEach(k=>{ totalStocks+=getActualStocksEx(k,'cn').length+getActualStocksEx(k,'us').length; });
   document.getElementById('totalStocks').textContent=totalStocks;
   document.getElementById('totalSectors').textContent=allKeys.length;
   document.getElementById('loadingOverlay').style.display='none';
@@ -1152,8 +1172,6 @@ function closeSidebar(){
 
 /* ===== 数据加载 ===== */
 async function loadData(){
-  // 优先从云端加载偏好设置
-  await loadCloudPrefs();
   // 优先: <script src="data.js"> 已加载的全局 SECTOR_DATA（最可靠）
   if(typeof SECTOR_DATA !== 'undefined' && SECTOR_DATA && SECTOR_DATA.sectors){
     data=SECTOR_DATA.sectors;
@@ -1229,7 +1247,6 @@ function loadCustomSectors() {
 }
 function saveCustomSectors(arr) {
   localStorage.setItem(LS_CUSTOM_SECTORS, JSON.stringify(arr));
-  saveCloudPrefs();
 }
 
 /** 获取全部板块 key 列表（原有 + 自定义），尊重用户排序 */
@@ -1328,6 +1345,7 @@ function deleteCustomSector(idx) {
 
 /* ===== 编辑/新建板块弹窗 ===== */
 let editingSectorIdx = null; // null = 新建, number = 编辑索引
+let editingSectorName = null; // 记录正在编辑的板块名（用于关闭后刷新）
 
 function openEditSector(idx) {
   closeSectorManager();
@@ -1335,6 +1353,7 @@ function openEditSector(idx) {
   const customs = loadCustomSectors();
   const isEdit = idx !== null && idx >= 0;
   const sec = isEdit ? customs[idx] : { key: '', type: 'industry', icon: '📊', stocks: { cn: [], us: [] } };
+  editingSectorName = sec.key || null;
 
   document.getElementById('editSectorTitle').textContent = isEdit ? '编辑板块' : '新建板块';
   renderEditSectorBody(sec);
@@ -1343,17 +1362,19 @@ function openEditSector(idx) {
 
 function closeEditSector() {
   const wasEditing = editingSectorIdx !== null;
+  const secName = editingSectorName;
   document.getElementById('editSectorModal').classList.remove('open');
   editingSectorIdx = null;
-  // 如果之前在编辑状态，关闭弹窗后刷新面板和计数
-  if (wasEditing) {
-    const customs = loadCustomSectors();
-    // 获取当前编辑的板块名（从 customs 里通过最后一个被编辑的 idx 获取）
-    if (customs.length > 0 && cur) {
-      rebuildPanel(cur);
-      updateSidebarCount(cur);
-      updateTotalStocks();
-    }
+  editingSectorName = null;
+  // 仅在"直接关闭弹窗（未保存）"时刷新当前视图
+  // saveEditSector / saveNewSector 会自行处理完整重建
+  if (wasEditing && secName && cur) {
+    rebuildPanel(cur);
+    updateSidebarCount(cur);
+    updateTotalStocks();
+    updateSummary(cur);
+    document.getElementById('summaryCnt_CN').textContent = getActualStocksEx(cur, 'cn').length + ' 只';
+    document.getElementById('summaryCnt_US').textContent = getActualStocksEx(cur, 'us').length + ' 只';
   }
 }
 
@@ -1498,7 +1519,10 @@ function saveNewSector() {
 
   customs.push({ key: name, type, icon, stocks: { cn: [], us: [] } });
   saveCustomSectors(customs);
-  closeEditSector();
+  // 手动关闭弹窗，不让 closeEditSector 的自动刷新干扰
+  document.getElementById('editSectorModal').classList.remove('open');
+  editingSectorIdx = null;
+  editingSectorName = null;
   rebuildFullDashboard();
   // 切换到新板块
   switchSector(name);
@@ -1528,7 +1552,10 @@ function saveEditSector() {
   customs[idx].type = type;
   customs[idx].stocks = preservedStocks;
   saveCustomSectors(customs);
-  closeEditSector();
+  // 手动关闭弹窗，不让 closeEditSector 的自动刷新干扰
+  document.getElementById('editSectorModal').classList.remove('open');
+  editingSectorIdx = null;
+  editingSectorName = null;
   rebuildFullDashboard();
   showToast('板块已更新');
 }
@@ -1733,7 +1760,7 @@ loadData();
  *   [44]=市值(亿元) [52]=PE(市盈率) [46]=PB
  * 美股格式: v_usNVDA="200~英伟达~NVDA.OQ~现价~昨收~今开~..."
  *   [3]=现价 [31]=涨跌额 [32]=涨跌幅(%)
- *   [39]=PE(市盈率) [37]=总股本 [62]=总市值 [63]=流通市值
+ *   [39]=PE(TTM) [62]=总股本(股数) 市值=price*[62]
  */
 function fetchTencentQuotes(symbols) {
   return new Promise(resolve => {
@@ -1772,9 +1799,9 @@ function fetchTencentQuotes(symbols) {
                   pe: 0
                 };
                 if (isUS) {
-                  // 美股: [37]=总股本, [62]=总市值, [39]=PE
+                  // 美股: [39]=PE(TTM), [62]=总股本(股数), 市值=price*[62]
                   const totalShares = parts.length > 62 ? parseFloat(parts[62]) : 0;
-                  entry.market_cap = totalShares > 0 ? Math.floor(totalShares) : 0;
+                  entry.market_cap = (totalShares > 0 && price > 0) ? Math.floor(price * totalShares) : 0;
                   entry.pe = parts.length > 39 ? parseFloat(parts[39]) || 0 : 0;
                 } else {
                   // A股: [44]=市值(亿元→元), [52]=PE
