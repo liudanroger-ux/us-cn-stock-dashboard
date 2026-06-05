@@ -312,6 +312,13 @@ body {
 .refresh-btn:disabled { opacity: .5; cursor: not-allowed; }
 .refresh-btn.success { color: var(--accent-green); border-color: rgba(0,181,120,.4); background: rgba(0,181,120,.1); }
 .refresh-btn.error { color: var(--accent-red); border-color: rgba(255,77,90,.4); background: rgba(255,77,90,.1); }
+.sync-btn {
+  padding: 5px 13px; background: rgba(165,94,234,.1);
+  border: 1px solid rgba(165,94,234,.3); color: var(--accent-purple);
+  border-radius: var(--radius-sm); cursor: pointer; font-size: 11px; font-weight: 600;
+  transition: all var(--transition); white-space: nowrap;
+}
+.sync-btn:hover { background: rgba(165,94,234,.2); border-color: rgba(165,94,234,.5); }
 .refresh-toast {
   position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
   background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md);
@@ -364,7 +371,7 @@ body {
     <div class="header-stat"><div class="header-stat-value" id="totalStocks">-</div><div class="header-stat-label">股票总数</div></div>
     <div class="header-stat"><div class="header-stat-value" id="totalSectors">-</div><div class="header-stat-label">板块</div></div>
     <div class="update-time"><div class="update-dot"></div><span id="updateTime">加载中...</span></div>
-    <div id="syncStatus" style="font-size:14px;cursor:pointer;margin:0 6px" onclick="openSyncSettings()" title="云端同步状态"></div>
+    <button id="syncBtn" class="sync-btn" onclick="openSyncSettings()" title="云端同步状态">☁️ 云同步</button>
     <button id="refreshBtn" class="refresh-btn" onclick="refreshRealtime()">🔄 刷新行情</button>
   </div>
 </header>
@@ -558,10 +565,10 @@ async function saveCloudPrefs(){
 }
 
 function updateSyncUI(){
-  const el=document.getElementById('syncStatus');
+  const el=document.getElementById('syncBtn');
   if(!el) return;
-  const map={idle:'☁️',syncing:'⏳',synced:'☁️ ✓',error:'⚠️',nokey:'🔒'};
-  el.textContent=map[cloudSyncStatus]||'☁️';
+  const map={idle:'☁️ 云同步',syncing:'⏳ 同步中',synced:'☁️ ✓ 已同步',error:'⚠️ 失败',nokey:'🔒 未配置'};
+  el.textContent=map[cloudSyncStatus]||'☁️ 云同步';
   const tips={idle:'云端同步空闲',syncing:'同步中...',synced:'已同步到云端 ✓',error:'同步失败（检查网络或 API Key）',nokey:'未配置 API Key，仅保存在本机'};
   el.title=tips[cloudSyncStatus]||'';
 }
@@ -1699,13 +1706,21 @@ async function fetchAndSaveToCustomSector(sectorKey, market, code) {
           if (q.pe > 0) s.pe = q.pe;
           if (q.name) s.name = q.name;
           saveCustomSectors(customs);
-          renderEditSectorBody(sec);
+          // 刷新面板（仅在非弹窗模式下）
+          const editModalOpen = document.getElementById('editSectorModal')?.classList?.contains('open');
+          if (!editModalOpen) {
+            rebuildPanel(sectorKey);
+            updateSidebarCount(sectorKey);
+            updateTotalStocks();
+            if (cur === sectorKey) updateSummary(sectorKey);
+          } else {
+            renderEditSectorBody(sec);
+          }
           // 同步更新 data 缓存
           if (!data[sectorKey]) data[sectorKey] = { name: sec.key, is_concept: sec.type === 'concept' };
           if (!data[sectorKey][market === 'cn' ? 'a_share' : 'us']) {
             data[sectorKey][market === 'cn' ? 'a_share' : 'us'] = { stocks: [], count: 0 };
           }
-          // 不需要重建面板（弹窗打开时）
         }
       }
     }
@@ -1718,6 +1733,13 @@ async function fetchAndSaveToCustomSector(sectorKey, market, code) {
 function rebuildFullDashboard() {
   const sidebar = document.getElementById('sidebar');
   const panels = document.getElementById('sectorPanels');
+  // 注册自定义板块到 data（与 initDash 保持一致）
+  const customs = loadCustomSectors();
+  customs.forEach(cs => {
+    if (!data[cs.key]) {
+      data[cs.key] = { name: cs.key, is_concept: cs.type === 'concept', a_share: { stocks: [], count: 0 }, us: { stocks: [], count: 0 } };
+    }
+  });
   const allKeys = getAllOrderedKeys();
 
   let navHtml = '<div class="concept-divider" style="border-top:none;margin-top:0">概念板块</div>';
