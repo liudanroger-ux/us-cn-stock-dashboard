@@ -1,4 +1,4 @@
-﻿<!-- Dashboard v20 - 2026-06-06 - 新增商业航天概念板块 + 修复侧栏硬编码 -->
+﻿<!-- Dashboard v21 - 2026-06-06 - 修复fetchTencentQuotes超时/日志 + 健壮性 -->
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -462,7 +462,7 @@ body {
   </div>
 </div>
 
-<script src="data.js?v=20" charset="UTF-8"></script>
+<script src="data.js?v=21" charset="UTF-8"></script>
 <script>
 /* ===== 配置 ===== */
 const ICONS={
@@ -1927,10 +1927,17 @@ function fetchTencentQuotes(symbols) {
       batches.push(symbols.slice(i, i + batchSize));
     }
     let done = 0;
-    batches.forEach(batch => {
+    let resolved = false;
+    const finish = () => { if (!resolved) { resolved = true; resolve(result); } };
+    // 超时保护：15秒后强制返回已有结果
+    const timer = setTimeout(() => { console.warn('[Quotes] Timeout after 15s, got', Object.keys(result).length, '/', symbols.length); finish(); }, 15000);
+    batches.forEach((batch, batchIdx) => {
       const script = document.createElement('script');
-      script.src = `https://qt.gtimg.cn/q=${batch.join(',')}`;
+      const url = `https://qt.gtimg.cn/q=${batch.join(',')}`;
+      script.src = url;
+      console.log('[Quotes] Batch', batchIdx+1, '/', batches.length, 'loading:', batch.length, 'symbols');
       script.onload = () => {
+        let parsed = 0;
         batch.forEach(sym => {
           const raw = window['v_' + sym];
           if (raw) {
@@ -1964,19 +1971,22 @@ function fetchTencentQuotes(symbols) {
                   entry.pe = parts.length > 52 ? parseFloat(parts[52]) || 0 : 0;
                 }
                 result[sym] = entry;
+                parsed++;
               }
             } catch(e) {}
           }
         });
+        console.log('[Quotes] Batch', batchIdx+1, 'done, parsed:', parsed, '/', batch.length);
         done++;
-        if (done === batches.length) resolve(result);
+        if (done === batches.length) { clearTimeout(timer); finish(); }
       };
       script.onerror = () => {
+        console.warn('[Quotes] Batch', batchIdx+1, 'FAILED');
         done++;
-        if (done === batches.length) resolve(result);
+        if (done === batches.length) { clearTimeout(timer); finish(); }
       };
       document.body.appendChild(script);
-      setTimeout(() => { try { script.remove(); } catch(e) {} }, 3000);
+      setTimeout(() => { try { script.remove(); } catch(e) {} }, 5000);
     });
   });
 }
