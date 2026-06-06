@@ -834,7 +834,8 @@ function rebuildPanel(key){
   const container=document.querySelector(`.sector-content[data-sector="${key}"]`);
   if(!container) return;
   const wasActive=container.classList.contains('active');
-  const newHTML=buildPanel(key);
+  // 自定义板块必须用 buildPanelEx，否则读的是空的 data[key]
+  const newHTML=isCustomSector(key)?buildPanelEx(key):buildPanel(key);
   container.outerHTML=newHTML;
   if(wasActive){
     const el=document.querySelector(`.sector-content[data-sector="${key}"]`);
@@ -1263,7 +1264,8 @@ function rebuildAllPanels(){
   const activeKey=cur;
   let panelHtml='';
   allKeys.forEach(k=>{
-    panelHtml+=buildPanel(k);
+    // 自定义板块必须用 buildPanelEx，读取 customSectors 而非 data[k]
+    panelHtml+=isCustomSector(k)?buildPanelEx(k):buildPanel(k);
     updateSidebarCount(k);
   });
   panels.innerHTML=panelHtml;
