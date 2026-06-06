@@ -1,4 +1,4 @@
-﻿<!-- Dashboard v21 - 2026-06-06 - 修复fetchTencentQuotes超时/日志 + 健壮性 -->
+﻿<!-- Dashboard v22 - 2026-06-06 - 修复自定义板块行情刷新：迁移extra数据+getActualStocksEx统一读取 -->
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -462,7 +462,7 @@ body {
   </div>
 </div>
 
-<script src="data.js?v=21" charset="UTF-8"></script>
+<script src="data.js?v=22" charset="UTF-8"></script>
 <script>
 /* ===== 配置 ===== */
 const ICONS={
@@ -1043,56 +1043,48 @@ function switchSector(key){
 
 /** 静默刷新指定板块行情（不弹 toast） */
 async function refreshSectorSilent(sectorKey){
-  // 自定义板块：从 customSectors 获取数据
+  // 自定义板块：用 getActualStocksEx 读取（合并 cs.stocks + extra）
   if(isCustomSector(sectorKey)){
-    const cs=getCustomSectorDef(sectorKey);
-    if(!cs) { console.warn('[Refresh] sector def not found:', sectorKey); return; }
-    // 防御：确保 stocks 字段存在
-    if(!cs.stocks) { cs.stocks = { cn:[], us:[] }; console.log('[Refresh] Auto-init stocks for:', sectorKey); }
-    if(!cs.stocks.cn) cs.stocks.cn = [];
-    if(!cs.stocks.us) cs.stocks.us = [];
+    const cnStocks=getActualStocksEx(sectorKey,'cn');
+    const usStocks=getActualStocksEx(sectorKey,'us');
+    const cnSyms=cnStocks.map(s=>cnToTencent(s.code));
+    const usSyms=usStocks.map(s=>usToTencent(s.code));
+    console.log('[Refresh]', sectorKey, 'cnSyms:', cnSyms.length, 'usSyms:', usSyms.length);
+    if(cnSyms.length===0&&usSyms.length===0) { console.log('[Refresh] No stocks to refresh for:', sectorKey); return; }
     try{
-      const cnSyms=(cs.stocks.cn||[]).map(s=>cnToTencent(s.code));
-      const usSyms=(cs.stocks.us||[]).map(s=>usToTencent(s.code));
-      console.log('[Refresh]', sectorKey, 'cnSyms:', cnSyms, 'usSyms:', usSyms);
-      if(cnSyms.length===0&&usSyms.length===0) { console.log('[Refresh] No stocks to refresh for:', sectorKey); return; }
       const[cnR,usR]=await Promise.all([
         cnSyms.length>0?fetchTencentQuotes(cnSyms):Promise.resolve({}),
         usSyms.length>0?fetchTencentQuotes(usSyms):Promise.resolve({})
       ]);
-      console.log('[Refresh] Fetched cnR keys:', Object.keys(cnR), 'usR keys:', Object.keys(usR));
+      console.log('[Refresh] Fetched cnR keys:', Object.keys(cnR).length, 'usR keys:', Object.keys(usR).length);
+      // 更新 cs.stocks
       const customs=loadCustomSectors();
       const sec=customs.find(s=>s.key===sectorKey);
-      if(!sec) { console.warn('[Refresh] sector not found after reload:', sectorKey); return; }
-      // 防御：确保 sec.stocks 存在
-      if(!sec.stocks) sec.stocks = { cn:[], us:[] };
-      if(!sec.stocks.cn) sec.stocks.cn = [];
-      if(!sec.stocks.us) sec.stocks.us = [];
-      // 更新 A 股
-      (sec.stocks.cn||[]).forEach(s=>{
-        const sym=cnToTencent(s.code);
-        const r=cnR[sym];
-        if(r&&r.price>0){
-          s.price=r.price;s.change_pct=r.change_pct;
-          if(r.name)s.name=r.name;
-          if(r.market_cap>0)s.market_cap=r.market_cap;
-          if(r.pe>0)s.pe=r.pe;
-        }
-      });
-      // 更新美股
-      (sec.stocks.us||[]).forEach(s=>{
-        const sym=usToTencent(s.code);
-        const r=usR[sym];
-        console.log('[Refresh] US stock:', s.code, 'sym:', sym, 'result:', r);
-        if(r&&r.price>0){
-          s.price=r.price;s.change_pct=r.change_pct;
-          if(r.name)s.name=r.name;
-          if(r.market_cap>0)s.market_cap=r.market_cap;
-          if(r.pe>0)s.pe=r.pe;
-        }
-      });
-      saveCustomSectors(customs);
-      console.log('[Refresh] Saved', sectorKey, 'us stocks:', sec.stocks.us);
+      if(sec){
+        if(!sec.stocks) sec.stocks = { cn:[], us:[] };
+        if(!sec.stocks.cn) sec.stocks.cn = [];
+        if(!sec.stocks.us) sec.stocks.us = [];
+        (sec.stocks.cn||[]).forEach(s=>{
+          const sym=cnToTencent(s.code); const r=cnR[sym];
+          if(r&&r.price>0){ s.price=r.price; s.change_pct=r.change_pct; if(r.name)s.name=r.name; if(r.market_cap>0)s.market_cap=r.market_cap; if(r.pe>0)s.pe=r.pe; }
+        });
+        (sec.stocks.us||[]).forEach(s=>{
+          const sym=usToTencent(s.code); const r=usR[sym];
+          if(r&&r.price>0){ s.price=r.price; s.change_pct=r.change_pct; if(r.name)s.name=r.name; if(r.market_cap>0)s.market_cap=r.market_cap; if(r.pe>0)s.pe=r.pe; }
+        });
+        saveCustomSectors(customs);
+      }
+      // 同步更新 extra（如果有）
+      const extra=loadExtra();
+      const hKeyCn=sectorKey+'_cn', hKeyUs=sectorKey+'_us';
+      if(extra[hKeyCn]){
+        extra[hKeyCn].forEach(s=>{ const sym=cnToTencent(s.code); const r=cnR[sym]; if(r&&r.price>0){ s.price=r.price; s.change_pct=r.change_pct; if(r.name)s.name=r.name; if(r.market_cap>0)s.market_cap=r.market_cap; if(r.pe>0)s.pe=r.pe; } });
+        saveExtra(extra);
+      }
+      if(extra[hKeyUs]){
+        extra[hKeyUs].forEach(s=>{ const sym=usToTencent(s.code); const r=usR[sym]; if(r&&r.price>0){ s.price=r.price; s.change_pct=r.change_pct; if(r.name)s.name=r.name; if(r.market_cap>0)s.market_cap=r.market_cap; if(r.pe>0)s.pe=r.pe; } });
+        saveExtra(extra);
+      }
       rebuildPanel(sectorKey);
       updateTimestamp();
     }catch(e){console.warn('Custom refresh error:',e);}
@@ -1145,6 +1137,8 @@ function updateSummary(key){
 
 /* ===== 初始化看板 ===== */
 function initDash(){
+  // 先迁移旧版本数据（extra 中的自定义板块股票 → cs.stocks）
+  migrateCustomSectorExtras();
   const sidebar=document.getElementById('sidebar');
   const panels=document.getElementById('sectorPanels');
   const sBar=document.getElementById('summaryBar');
@@ -1377,6 +1371,43 @@ function loadCustomSectors() {
 }
 function saveCustomSectors(arr) {
   localStorage.setItem(LS_CUSTOM_SECTORS, JSON.stringify(arr));
+}
+
+/** 迁移：将 extra 中的自定义板块股票合并到 cs.stocks（解决旧版本数据分裂问题） */
+function migrateCustomSectorExtras() {
+  const customs = loadCustomSectors();
+  const extra = loadExtra();
+  let csChanged = false, exChanged = false;
+  customs.forEach(cs => {
+    if (!cs.stocks) { cs.stocks = { cn: [], us: [] }; csChanged = true; }
+    ['cn', 'us'].forEach(market => {
+      const hKey = cs.key + '_' + market;
+      const extraStocks = extra[hKey] || [];
+      if (extraStocks.length > 0) {
+        if (!cs.stocks[market]) cs.stocks[market] = [];
+        const existCodes = new Set(cs.stocks[market].map(s => s.code));
+        extraStocks.forEach(s => {
+          if (!existCodes.has(s.code)) {
+            cs.stocks[market].push({
+              code: s.code,
+              name: s.name || s.code,
+              price: s.price || 0,
+              change_pct: s.change_pct || 0,
+              market_cap: s.market_cap || 0,
+              pe: s.pe || 0
+            });
+            existCodes.add(s.code);
+            csChanged = true;
+          }
+        });
+        delete extra[hKey];
+        exChanged = true;
+      }
+    });
+  });
+  if (csChanged) saveCustomSectors(customs);
+  if (exChanged) saveExtra(extra);
+  if (csChanged || exChanged) console.log('[Migrate] 已将 extra 中的自定义板块股票迁移到 cs.stocks');
 }
 
 /** 获取全部板块 key 列表（原有 + 自定义），尊重用户排序 */
@@ -2193,13 +2224,12 @@ async function autoFixChangePct(){
   const allCnSyms = new Set();
   const allUsSyms = new Set();
   for(const key of allKeys){
-    // 自定义板块
+    // 自定义板块：用 getActualStocksEx 读取（合并 cs.stocks + extra）
     if(isCustomSector(key)){
-      const cs=getCustomSectorDef(key);
-      if(cs){
-        (cs.stocks.cn||[]).forEach(s=>allCnSyms.add(cnToTencent(s.code)));
-        (cs.stocks.us||[]).forEach(s=>allUsSyms.add(usToTencent(s.code)));
-      }
+      const cn=getActualStocksEx(key,'cn');
+      const us=getActualStocksEx(key,'us');
+      cn.forEach(s=>allCnSyms.add(cnToTencent(s.code)));
+      us.forEach(s=>allUsSyms.add(usToTencent(s.code)));
       continue;
     }
     const sectorData = data[key];
@@ -2236,16 +2266,23 @@ async function autoFixChangePct(){
     // 3. 逐板块修正
     let totalFixed = 0;
     for(const key of allKeys){
-      // 自定义板块修正
+      // 自定义板块修正（更新 cs.stocks + extra）
       if(isCustomSector(key)){
         const customs=loadCustomSectors();
         const sec=customs.find(s=>s.key===key);
         if(sec){
           let changed=false;
+          if(!sec.stocks) sec.stocks={cn:[],us:[]};
           (sec.stocks.cn||[]).forEach(s=>{const sym=cnToTencent(s.code);const r=allCn[sym];if(r&&r.price>0){if(s.change_pct!==r.change_pct)totalFixed++;s.price=r.price;s.change_pct=r.change_pct;if(r.name)s.name=r.name;if(r.market_cap>0)s.market_cap=r.market_cap;if(r.pe>0)s.pe=r.pe;changed=true;}});
           (sec.stocks.us||[]).forEach(s=>{const sym=usToTencent(s.code);const r=allUs[sym];if(r&&r.price>0){if(s.change_pct!==r.change_pct)totalFixed++;s.price=r.price;s.change_pct=r.change_pct;if(r.name)s.name=r.name;if(r.market_cap>0)s.market_cap=r.market_cap;if(r.pe>0)s.pe=r.pe;changed=true;}});
           if(changed) saveCustomSectors(customs);
         }
+        // 同步更新 extra
+        const extra=loadExtra();
+        let exChanged=false;
+        (extra[`${key}_cn`]||[]).forEach(s=>{const sym=cnToTencent(s.code);const r=allCn[sym];if(r&&r.price>0){if(s.change_pct!==r.change_pct)totalFixed++;s.price=r.price;s.change_pct=r.change_pct;if(r.name)s.name=r.name;if(r.market_cap>0)s.market_cap=r.market_cap;if(r.pe>0)s.pe=r.pe;exChanged=true;}});
+        (extra[`${key}_us`]||[]).forEach(s=>{const sym=usToTencent(s.code);const r=allUs[sym];if(r&&r.price>0){if(s.change_pct!==r.change_pct)totalFixed++;s.price=r.price;s.change_pct=r.change_pct;if(r.name)s.name=r.name;if(r.market_cap>0)s.market_cap=r.market_cap;if(r.pe>0)s.pe=r.pe;exChanged=true;}});
+        if(exChanged) saveExtra(extra);
         continue;
       }
       const sectorData = data[key];
